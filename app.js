@@ -45,7 +45,36 @@ function fmtIT(n) {
 }
 
 function parseCSV(text) {
-  return text.split('\n').map(line => line.split(',').map(c => c.replace(/^"|"$/g, '').trim()));
+  const rows = [];
+  const lines = text.split('\n');
+  for (const line of lines) {
+    if (line.trim() === '') continue;
+    const row = [];
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] === '"') {
+        i++; // salta virgoletta di apertura
+        let field = '';
+        while (i < line.length && line[i] !== '"') {
+          field += line[i];
+          i++;
+        }
+        i++; // salta virgoletta di chiusura
+        row.push(field);
+        if (i < line.length && line[i] === ',') i++; // salta virgola separatore
+      } else {
+        let field = '';
+        while (i < line.length && line[i] !== ',') {
+          field += line[i];
+          i++;
+        }
+        row.push(field);
+        if (i < line.length && line[i] === ',') i++;
+      }
+    }
+    rows.push(row);
+  }
+  return rows;
 }
 
 // Legge AP da Supabase (tabella anno_ap). Restituisce null se non esiste.
