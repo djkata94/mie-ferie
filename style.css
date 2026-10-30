@@ -87,8 +87,8 @@ td:first-child { font-family: 'Fraunces', serif; font-weight: 500; }
   font-weight: 700; color: #c99a4a; background: rgba(201,154,74,0.14);
   font-family: 'IBM Plex Mono', monospace;
   border: 1px solid rgba(201,154,74,0.35);
-  border-radius: 4px; padding: 4px 8px; display: block; width: 100%;
-  text-align: center; box-sizing: border-box;
+  border-radius: 4px; padding: 6px 10px; display: block; width: 100%;
+  text-align: center; box-sizing: border-box; margin: 3px 0;
 }
 
 .input-card {

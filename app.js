@@ -248,8 +248,10 @@ async function calcolaAnno(anno) {
 function render(dati) {
   gridBody.innerHTML = '';
 
-  // Barra AP: visibile solo se AP non bloccato
-  if (dati.apBloccato) {
+  // Barra AP: visibile se AP non bloccato, oppure se bloccato ma a zero (da impostare)
+  const apEffettivamenteBloccato = dati.apBloccato && !(dati.apFerie === 0 && dati.apPermessi === 0);
+
+  if (apEffettivamenteBloccato) {
     if (apBar) apBar.style.display = 'none';
     const trAP = document.createElement('tr');
     trAP.className = 'row-ap';
