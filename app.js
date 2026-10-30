@@ -7,6 +7,8 @@ const annoSel = document.getElementById('anno');
 const meseSel = document.getElementById('mese');
 const ferieIn = document.getElementById('ferie');
 const permessiIn = document.getElementById('permessi');
+const btnEsporta = document.getElementById('btnEsporta');
+const fileImport = document.getElementById('fileImport');
 const form = document.getElementById('form');
 const tbody = document.getElementById('tbody');
 const msg = document.getElementById('msg');
@@ -172,6 +174,49 @@ async function loadAnni() {
   caricaAnno(currentAnno);
 }
 
+function esportaDati() {
+  const dati = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('mf_goduti_')) {
+      const anno = key.replace('mf_goduti_', '');
+      dati[anno] = JSON.parse(localStorage.getItem(key));
+    }
+  }
+  const blob = new Blob([JSON.stringify(dati, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `mie-ferie-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  show('Backup esportato. Caricalo sugli altri dispositivi con "Importa dati".', 'ok');
+}
+
+function importaDati(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const dati = JSON.parse(ev.target.result);
+      let count = 0;
+      for (const anno in dati) {
+        if (dati.hasOwnProperty(anno)) {
+          localStorage.setItem('mf_goduti_' + anno, JSON.stringify(dati[anno]));
+          count++;
+        }
+      }
+      show('Importati dati di ' + count + ' anno/i. Ricaricando...', 'ok');
+      fileImport.value = '';
+      caricaAnno(currentAnno || anni[anni.length - 1]);
+    } catch (err) {
+      show('File non valido o corrotto.', 'err');
+    }
+  };
+  reader.readAsText(file);
+}
+
 form.addEventListener('submit', (e) => {
   e.preventDefault();
   if (!currentAnno) return;
@@ -193,5 +238,8 @@ form.addEventListener('submit', (e) => {
 });
 
 annoSel.addEventListener('change', (e) => caricaAnno(e.target.value));
+
+btnEsporta.addEventListener('click', esportaDati);
+fileImport.addEventListener('change', importaDati);
 
 loadAnni();
