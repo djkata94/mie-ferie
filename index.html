@@ -1,74 +1,71 @@
 <!DOCTYPE html>
-<html lang="it">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mie Ferie &amp; Permessi</title>
+  <base target="_top">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
+  <title>Dashboard Ferie &amp; Permessi</title>
 </head>
 <body>
-  <div class="wrap">
-    <header class="bar">
-      <h1>Mie Ferie &amp; Permessi</h1>
-      <div class="anno-sel">
-        <label for="anno">Anno</label>
-        <select id="anno"></select>
-      </div>
-    </header>
 
-    <div id="msg" class="msg"></div>
-
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Mese</th>
-            <th>Godute Ferie</th>
-            <th>Godute Permessi</th>
-            <th>Resid. Ferie</th>
-            <th>Resid. Permessi</th>
-            <th>Totale Residuo</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
-    </div>
-
-    <div class="card form-card">
-      <form id="form">
-        <div class="row">
-          <label>Mese</label>
-          <select id="mese" required>
-            <option value="GENNAIO">Gennaio</option>
-            <option value="FEBBRAIO">Febbraio</option>
-            <option value="MARZO">Marzo</option>
-            <option value="APRILE">Aprile</option>
-            <option value="MAGGIO">Maggio</option>
-            <option value="GIUGNO">Giugno</option>
-            <option value="LUGLIO">Luglio</option>
-            <option value="AGOSTO">Agosto</option>
-            <option value="SETTEMBRE">Settembre</option>
-            <option value="OTTOBRE">Ottobre</option>
-            <option value="NOVEMBRE">Novembre</option>
-            <option value="DICEMBRE">Dicembre</option>
-          </select>
-        </div>
-        <div class="row">
-          <label>Ferie godute (h)</label>
-          <input type="number" id="ferie" step="0.01" min="0" required>
-        </div>
-        <div class="row">
-          <label>Permessi goduti (h)</label>
-          <input type="number" id="permessi" step="0.01" min="0" required>
-        </div>
-        <div class="row">
-          <button type="submit">Salva</button>
-        </div>
-      </form>
+<div class="container">
+  <div class="ledger-tab"><i class="fas fa-calendar-alt"></i> Registro Ore</div>
+  <div class="header-container">
+    <h2>
+      <i class="fas fa-calendar-alt"></i>Gestione Ferie &amp; Permessi
+    </h2>
+    <div class="select-anno-wrapper">
+      <label>Anno</label>
+      <select id="selAnno" onchange="caricaGriglia()"></select>
     </div>
   </div>
-  <script src="app.js"></script>
+
+  <div id="msg" class="msg"></div>
+
+  <div class="table-container">
+    <table id="dataGrid">
+      <thead>
+        <tr>
+          <th>Mese</th>
+          <th>Godute (F/P)</th>
+          <th>Resid. Ferie</th>
+          <th>Resid. Permessi</th>
+          <th>Totale Residuo</th>
+        </tr>
+      </thead>
+      <tbody id="gridBody"></tbody>
+    </table>
+  </div>
+
+  <div class="input-card">
+    <div>
+      <label>Seleziona Mese</label>
+      <select id="mese">
+        <option value="GENNAIO">Gennaio</option><option value="FEBBRAIO">Febbraio</option>
+        <option value="MARZO">Marzo</option><option value="APRILE">Aprile</option>
+        <option value="MAGGIO">Maggio</option><option value="GIUGNO">Giugno</option>
+        <option value="LUGLIO">Luglio</option><option value="AGOSTO">Agosto</option>
+        <option value="SETTEMBRE">Settembre</option><option value="OTTOBRE">Ottobre</option>
+        <option value="NOVEMBRE">Novembre</option><option value="DICEMBRE">Dicembre</option>
+      </select>
+    </div>
+    <div>
+      <label>Ferie Godute</label>
+      <input type="number" id="ferie" step="0.01" placeholder="Ore">
+    </div>
+    <div>
+      <label>Permessi Goduti</label>
+      <input type="number" id="permessi" step="0.01" placeholder="Ore">
+    </div>
+    <button id="btnSalva" onclick="inviaDati()">Salva</button>
+  </div>
+  <p id="status" style="font-size:0.85rem; color:var(--brass); text-align:center; min-height: 20px; margin-top:15px; font-family:'IBM Plex Mono', monospace;"></p>
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>

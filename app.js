@@ -1,30 +1,28 @@
-let anni = [];
-let currentAnno = null;
-
-const annoSel = document.getElementById('anno');
-const meseSel = document.getElementById('mese');
-const ferieIn = document.getElementById('ferie');
-const permessiIn = document.getElementById('permessi');
-const form = document.getElementById('form');
-const tbody = document.getElementById('tbody');
-const msg = document.getElementById('msg');
-
 const MESI = ["GENNAIO","FEBBRAIO","MARZO","APRILE","MAGGIO","GIUGNO","LUGLIO","AGOSTO","SETTEMBRE","OTTOBRE","NOVEMBRE","DICEMBRE"];
 const MESI_LABEL = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
 
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+let anni = [];
+let currentAnno = null;
+
+const selAnno = document.getElementById('selAnno');
+const mese = document.getElementById('mese');
+const ferie = document.getElementById('ferie');
+const permessi = document.getElementById('permessi');
+const btnSalva = document.getElementById('btnSalva');
+const status = document.getElementById('status');
+const gridBody = document.getElementById('gridBody');
+
 function show(testo, tipo = 'info') {
-  msg.textContent = testo;
-  msg.className = 'msg ' + tipo;
-  msg.style.display = testo ? 'block' : 'none';
-  if (tipo !== 'err') {
-    setTimeout(() => { msg.style.display = 'none'; }, 3000);
-  }
+  status.textContent = testo;
+  status.style.color = tipo === 'ok' ? '#4ade80' : (tipo === 'err' ? '#f87171' : '#c99a4a');
+  status.style.display = testo ? 'block' : 'none';
+  if (tipo !== 'err') setTimeout(() => { status.style.display = 'none'; }, 3000);
 }
 
 function parseIT(s) {
-  if (s === null || s === undefined || String(s).trim() === '') return 0;
+  if (s === null || s === undefined || String(s).trim() === '' || String(s).trim() === '-') return 0;
   return parseFloat(String(s).replace(',', '.')) || 0;
 }
 
@@ -36,8 +34,23 @@ function parseCSV(text) {
   return text.split('\n').map(line => line.split(',').map(c => c.replace(/^"|"$/g, '').trim()));
 }
 
-// Calcola i dati per un anno partendo dai CSV (maturazione) e dai valori salvati su Supabase (goduto).
-async function calcola(anno) {
+// Cerca in una riga del CSV l'ultimo valore numerico (residuo teorico)
+function trovaResiduoTeorico(rows, etichetta) {
+  for (let r = 0; r < rows.length; r++) {
+    if (!rows[r]) continue;
+    const trovata = rows[r].some(cell => String(cell).includes(etichetta));
+    if (trovata) {
+      for (let c = rows[r].length - 1; c >= 0; c--) {
+        const v = parseIT(rows[r][c]);
+        if (String(rows[r][c]) !== '' && !isNaN(v)) return v;
+      }
+    }
+  }
+  return 0;
+}
+
+// Calcola residui per un anno: AP + maturazione (CSV) - goduto (Supabase)
+async function calcolaAnno(anno) {
   const r = await fetch(`data/${anno}.csv`);
   if (!r.ok) throw new Error('CSV non trovato per ' + anno);
   const rows = parseCSV(await r.text());
@@ -47,8 +60,20 @@ async function calcola(anno) {
   const godFRow = rows[4] || [];
   const godPRow = rows[5] || [];
 
-  const apFerie = parseIT(ferieRow[1]);
-  const apPermessi = parseIT(permRow[1]);
+  // AP: se presente nel CSV (colonna B, indice 1) usa quello
+  let apFerie = parseIT(ferieRow[1]);
+  let apPermessi = parseIT(permRow[1]);
+
+  // Se AP mancante e esiste anno precedente, prendi residuo teorico anno precedente
+  const annoPrev = (parseInt(anno, 10) - 1).toString();
+  if ((apFerie === 0 && apPermessi === 0) && anni.includes(annoPrev)) {
+    const r2 = await fetch(`data/${annoPrev}.csv`);
+    if (r2.ok) {
+      const prevRows = parseCSV(await r2.text());
+      apFerie = trovaResiduoTeorico(prevRows, 'FERIE RESIDUE TEORICHE') || 0;
+      apPermessi = trovaResiduoTeorico(prevRows, 'PERMESSI RESIDUI TEORICI') || 0;
+    }
+  }
 
   // Carica goduti da Supabase
   const { data: dbRows } = await supabase
@@ -58,7 +83,7 @@ async function calcola(anno) {
 
   const dbMap = {};
   if (dbRows) {
-    dbRows.forEach(row => { dbMap[row.mese] = { f: row.ferie_ore, p: row.permessi_ore }; });
+    dbRows.forEach(row => { dbMap[row.mese] = { f: parseFloat(row.ferie_ore), p: parseFloat(row.permessi_ore) }; });
   }
 
   const mesi = [];
@@ -66,19 +91,18 @@ async function calcola(anno) {
   let runningP = apPermessi;
 
   for (let i = 0; i < 12; i++) {
-    const col = i + 2; // 0 etichetta, 1 AP, 2..13 mesi
+    const col = i + 2; // colonna C (indice 2) = Gennaio
     const matF = parseIT(ferieRow[col]);
     const matP = parseIT(permRow[col]);
     const saved = dbMap[MESI[i]];
-    const godF = saved !== undefined ? parseFloat(saved.f) : parseIT(godFRow[col]);
-    const godP = saved !== undefined ? parseFloat(saved.p) : parseIT(godPRow[col]);
+    const godF = saved !== undefined ? saved.f : parseIT(godFRow[col]);
+    const godP = saved !== undefined ? saved.p : parseIT(godPRow[col]);
 
     runningF += (matF - godF);
     runningP += (matP - godP);
 
     mesi.push({
-      nome: MESI[i],
-      label: MESI_LABEL[i],
+      nome: MESI_LABEL[i],
       matF, matP, godF, godP,
       resF: runningF, resP: runningP,
       totale: runningF + runningP
@@ -89,8 +113,9 @@ async function calcola(anno) {
 }
 
 function render(dati) {
-  tbody.innerHTML = '';
+  gridBody.innerHTML = '';
 
+  // Riga AP
   const trAP = document.createElement('tr');
   trAP.className = 'row-ap';
   trAP.innerHTML = `
@@ -100,38 +125,76 @@ function render(dati) {
     <td class="res-val">${fmtIT(dati.apPermessi)}h</td>
     <td class="tot-val">${fmtIT(dati.apFerie + dati.apPermessi)}h</td>
   `;
-  tbody.appendChild(trAP);
+  gridBody.appendChild(trAP);
 
   dati.mesi.forEach(m => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${m.label}</td>
-      <td class="god-val">${fmtIT(m.godF)}</td>
-      <td class="god-val">${fmtIT(m.godP)}</td>
+      <td>${m.nome}</td>
+      <td class="god-val">${fmtIT(m.godF)} / ${fmtIT(m.godP)}</td>
       <td class="res-val">${fmtIT(m.resF)}h</td>
       <td class="res-val">${fmtIT(m.resP)}h</td>
       <td class="tot-val">${fmtIT(m.totale)}h</td>
     `;
-    tbody.appendChild(tr);
+    gridBody.appendChild(tr);
   });
 
-  meseSel.value = MESI[new Date().getMonth()];
-  ferieIn.value = '';
-  permessiIn.value = '';
+  mese.value = MESI[new Date().getMonth()];
+  ferie.value = '';
+  permessi.value = '';
 }
 
-async function caricaAnno(anno) {
+async function caricaGriglia() {
+  const anno = selAnno.value;
+  if (!anno) return;
   currentAnno = anno;
   show('Caricamento...', 'info');
-  tbody.innerHTML = '';
+  gridBody.innerHTML = '';
 
   try {
-    const dati = await calcola(anno);
+    const dati = await calcolaAnno(anno);
     render(dati);
     show('', 'info');
   } catch (e) {
     show('Errore nel caricamento: ' + e.message, 'err');
   }
+}
+
+async function inviaDati() {
+  const anno = selAnno.value;
+  const m = mese.value;
+  const f = ferie.value;
+  const p = permessi.value;
+  btnSalva.disabled = true;
+  show('Invio in corso...', 'info');
+
+  try {
+    const { error } = await supabase
+      .from('ferie_mensili')
+      .upsert({
+        anno: parseInt(anno, 10),
+        mese: m,
+        ferie_ore: parseFloat(f) || 0,
+        permessi_ore: parseFloat(p) || 0,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'anno, mese' });
+
+    if (error) throw error;
+
+    show('Salvato.', 'ok');
+    btnSalva.disabled = false;
+    setTimeout(() => { status.style.display = 'none'; }, 3000);
+    ferie.value = '';
+    permessi.value = '';
+    caricaGriglia();
+  } catch (e) {
+    show('Errore salvataggio: ' + e.message, 'err');
+    btnSalva.disabled = false;
+  }
+}
+
+function impostaMeseCorrente() {
+  mese.value = MESI[new Date().getMonth()];
 }
 
 async function loadAnni() {
@@ -143,49 +206,19 @@ async function loadAnni() {
     anni = ["2026","2027","2028","2029","2030"];
   }
 
-  annoSel.innerHTML = '';
+  selAnno.innerHTML = '';
   anni.forEach(a => {
-    const o = document.createElement('option');
-    o.value = a;
-    o.textContent = a;
-    annoSel.appendChild(o);
+    const opt = document.createElement('option');
+    opt.value = a;
+    opt.innerText = a;
+    selAnno.appendChild(opt);
   });
 
-  currentAnno = anni[anni.length - 1] || new Date().getFullYear().toString();
-  annoSel.value = currentAnno;
-  caricaAnno(currentAnno);
+  const annoCorrente = new Date().getFullYear().toString();
+  selAnno.value = anni.includes(annoCorrente) ? annoCorrente : anni[anni.length - 1];
+  currentAnno = selAnno.value;
+  impostaMeseCorrente();
+  caricaGriglia();
 }
-
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  if (!currentAnno) return;
-
-  const mese = meseSel.value;
-  const f = parseFloat(ferieIn.value) || 0;
-  const p = parseFloat(permessiIn.value) || 0;
-
-  const { error } = await supabase
-    .from('ferie_mensili')
-    .upsert({
-      anno: parseInt(currentAnno, 10),
-      mese: mese,
-      ferie_ore: f,
-      permessi_ore: p,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'anno, mese' });
-
-  if (error) {
-    show('Errore nel salvataggio: ' + error.message, 'err');
-    return;
-  }
-
-  show('Salvato per ' + meseSel.options[meseSel.selectedIndex].text, 'ok');
-  ferieIn.value = '';
-  permessiIn.value = '';
-
-  caricaAnno(currentAnno);
-});
-
-annoSel.addEventListener('change', (e) => caricaAnno(e.target.value));
 
 loadAnni();
