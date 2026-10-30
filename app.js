@@ -53,15 +53,15 @@ function parseCSV(text) {
     let i = 0;
     while (i < line.length) {
       if (line[i] === '"') {
-        i++; // salta virgoletta di apertura
+        i++;
         let field = '';
         while (i < line.length && line[i] !== '"') {
           field += line[i];
           i++;
         }
-        i++; // salta virgoletta di chiusura
+        i++;
         row.push(field);
-        if (i < line.length && line[i] === ',') i++; // salta virgola separatore
+        if (i < line.length && line[i] === ',') i++;
       } else {
         let field = '';
         while (i < line.length && line[i] !== ',') {
@@ -77,7 +77,7 @@ function parseCSV(text) {
   return rows;
 }
 
-// Legge AP da Supabase (tabella anno_ap). Restituisce null se non esiste.
+// Legge AP da Supabase. Restituisce sempre un oggetto (mai null).
 async function caricaAP(anno) {
   try {
     const { data, error } = await sb
@@ -87,12 +87,12 @@ async function caricaAP(anno) {
       .maybeSingle();
     if (error) {
       console.error('Errore caricaAP:', error);
-      return null;
+      return { ap_ferie: 0, ap_permessi: 0, bloccato: false };
     }
-    return data;
+    return data || { ap_ferie: 0, ap_permessi: 0, bloccato: false };
   } catch (e) {
     console.error('Eccezione caricaAP:', e);
-    return null;
+    return { ap_ferie: 0, ap_permessi: 0, bloccato: false };
   }
 }
 
@@ -111,33 +111,35 @@ async function salvaAP(anno, ferie, permessi) {
 }
 
 function chiudiPopupAP() {
-  popupAP.style.display = 'none';
-  apMsg.textContent = '';
+  if (popupAP) popupAP.style.display = 'none';
+  if (apMsg) apMsg.textContent = '';
 }
 
-btnAnnullaAP.addEventListener('click', chiudiPopupAP);
-popupAP.addEventListener('click', (e) => {
+if (btnAnnullaAP) btnAnnullaAP.addEventListener('click', chiudiPopupAP);
+if (popupAP) popupAP.addEventListener('click', (e) => {
   if (e.target === popupAP) chiudiPopupAP();
 });
 
 function apriPopupAP(anno, suggerimentoF, suggerimentoP) {
-  apAnnoSpan.textContent = anno;
-  apFerieInput.value = suggerimentoF !== undefined ? suggerimentoF : '';
-  apPermessiInput.value = suggerimentoP !== undefined ? suggerimentoP : '';
-  apMsg.textContent = '';
-  popupAP.style.display = 'flex';
-  apFerieInput.focus();
+  if (apAnnoSpan) apAnnoSpan.textContent = anno;
+  if (apFerieInput) apFerieInput.value = suggerimentoF !== undefined && suggerimentoF !== null ? suggerimentoF : '';
+  if (apPermessiInput) apPermessiInput.value = suggerimentoP !== undefined && suggerimentoP !== null ? suggerimentoP : '';
+  if (apMsg) apMsg.textContent = '';
+  if (popupAP) {
+    popupAP.style.display = 'flex';
+    if (apFerieInput) apFerieInput.focus();
+  }
 }
 
-btnConfermaAP.addEventListener('click', async () => {
-  const anno = apAnnoSpan.textContent;
-  const f = apFerieInput.value;
-  const p = apPermessiInput.value;
+if (btnConfermaAP) btnConfermaAP.addEventListener('click', async () => {
+  const anno = apAnnoSpan ? apAnnoSpan.textContent : currentAnno;
+  const f = apFerieInput ? apFerieInput.value : '';
+  const p = apPermessiInput ? apPermessiInput.value : '';
   if (f === '' && p === '') {
-    apMsg.textContent = 'Inserisci almeno un valore.';
+    if (apMsg) apMsg.textContent = 'Inserisci almeno un valore.';
     return;
   }
-  btnConfermaAP.disabled = true;
+  if (btnConfermaAP) btnConfermaAP.disabled = true;
   try {
     await salvaAP(anno, f, p);
     apBloccato = true;
@@ -148,7 +150,7 @@ btnConfermaAP.addEventListener('click', async () => {
   } catch (e) {
     show('Errore salvataggio AP: ' + e.message, 'err');
   } finally {
-    btnConfermaAP.disabled = false;
+    if (btnConfermaAP) btnConfermaAP.disabled = false;
   }
 });
 
@@ -175,10 +177,10 @@ async function calcolaAnno(anno) {
   let apDaSupabase = null;
   if (apCSVVuoto) {
     apDaSupabase = await caricaAP(anno);
-    if (apDaSupabase) {
+    if (apDaSupabase && apDaSupabase.bloccato === true) {
       apFerie = parseFloat(apDaSupabase.ap_ferie) || 0;
       apPermessi = parseFloat(apDaSupabase.ap_permessi) || 0;
-      apBloccato = apDaSupabase.bloccato === true;
+      apBloccato = true;
       apValori = { ferie: apFerie, permessi: apPermessi };
     } else {
       apBloccato = false;
@@ -190,7 +192,7 @@ async function calcolaAnno(anno) {
     apValori = { ferie: apFerie, permessi: apPermessi };
   }
 
-  // --- Suggerimento AP: residuo dicembre dell'anno precedente, se esiste ---
+  // --- Suggerimento AP: residuo dicembre dell'anno precedente ---
   let suggerimentoF = 0;
   let suggerimentoP = 0;
   const annoPrev = (parseInt(anno, 10) - 1).toString();
@@ -246,10 +248,9 @@ async function calcolaAnno(anno) {
 function render(dati) {
   gridBody.innerHTML = '';
 
-  // Barra AP: mostra se bloccato o bottone per impostare
+  // Barra AP: visibile solo se AP non bloccato
   if (dati.apBloccato) {
-    apBar.style.display = 'none';
-    // Riga AP nella tabella (valore bloccato, solo lettura)
+    if (apBar) apBar.style.display = 'none';
     const trAP = document.createElement('tr');
     trAP.className = 'row-ap';
     trAP.innerHTML = `
@@ -261,10 +262,11 @@ function render(dati) {
     `;
     gridBody.appendChild(trAP);
   } else {
-    apBar.style.display = 'block';
-    apLabel.textContent = 'AP (Anno Prec.):';
-    apVal.textContent = 'non impostato';
-    // Riga AP nella tabella (input visivi tramite barra esterna)
+    if (apBar) {
+      apBar.style.display = 'block';
+      if (apLabel) apLabel.textContent = 'AP (Anno Prec.):';
+      if (apVal) apVal.textContent = 'non impostato';
+    }
     const trAP = document.createElement('tr');
     trAP.className = 'row-ap';
     trAP.innerHTML = `
@@ -300,18 +302,17 @@ async function caricaGriglia() {
   currentAnno = anno;
   show('Caricamento...', 'info');
   gridBody.innerHTML = '';
-  apBar.style.display = 'none';
+  if (apBar) apBar.style.display = 'none';
 
   try {
     const dati = await calcolaAnno(anno);
     render(dati);
 
-    // Se AP non bloccato e non c'è valore, mostra popup dopo un brevissimo ritardo
-    // così l'utente vede prima la griglia e poi il suggerimento.
-    if (!dati.apBloccato && (dati.apFerie === 0 && dati.apPermessi === 0)) {
+    // Se AP non bloccato e valore zero, apri popup dopo breve ritardo
+    if (!dati.apBloccato && dati.apFerie === 0 && dati.apPermessi === 0) {
       setTimeout(() => {
         apriPopupAP(anno, dati.suggerimentoF, dati.suggerimentoP);
-      }, 300);
+      }, 400);
     }
 
     show('', 'info');
