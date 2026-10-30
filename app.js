@@ -1,20 +1,18 @@
-const API_BASE = 'data';
 let anni = [];
 let currentAnno = null;
-let cache = {}; // anno -> { anno, apFerie, apPermessi, mesi[] }
 
 const annoSel = document.getElementById('anno');
 const meseSel = document.getElementById('mese');
 const ferieIn = document.getElementById('ferie');
 const permessiIn = document.getElementById('permessi');
-const btnEsporta = document.getElementById('btnEsporta');
-const fileImport = document.getElementById('fileImport');
 const form = document.getElementById('form');
 const tbody = document.getElementById('tbody');
 const msg = document.getElementById('msg');
 
 const MESI = ["GENNAIO","FEBBRAIO","MARZO","APRILE","MAGGIO","GIUGNO","LUGLIO","AGOSTO","SETTEMBRE","OTTOBRE","NOVEMBRE","DICEMBRE"];
 const MESI_LABEL = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function show(testo, tipo = 'info') {
   msg.textContent = testo;
@@ -38,18 +36,30 @@ function parseCSV(text) {
   return text.split('\n').map(line => line.split(',').map(c => c.replace(/^"|"$/g, '').trim()));
 }
 
-// Calcola i dati per un anno. Se apFerie/apPermessi sono passati, li usa come AP
-// (riporto dall'anno precedente), altrimenti legge la colonna B del CSV.
-function calcola(anno, rows, apFerieOverride, apPermessiOverride) {
+// Calcola i dati per un anno partendo dai CSV (maturazione) e dai valori salvati su Supabase (goduto).
+async function calcola(anno) {
+  const r = await fetch(`data/${anno}.csv`);
+  if (!r.ok) throw new Error('CSV non trovato per ' + anno);
+  const rows = parseCSV(await r.text());
+
   const ferieRow = rows[1] || [];
   const permRow = rows[2] || [];
   const godFRow = rows[4] || [];
   const godPRow = rows[5] || [];
 
-  const apFerie = apFerieOverride !== undefined ? apFerieOverride : parseIT(ferieRow[1]);
-  const apPermessi = apPermessiOverride !== undefined ? apPermessiOverride : parseIT(permRow[1]);
+  const apFerie = parseIT(ferieRow[1]);
+  const apPermessi = parseIT(permRow[1]);
 
-  const salvati = JSON.parse(localStorage.getItem('mf_goduti_' + anno) || '{}');
+  // Carica goduti da Supabase
+  const { data: dbRows } = await supabase
+    .from('ferie_mensili')
+    .select('mese, ferie_ore, permessi_ore')
+    .eq('anno', parseInt(anno, 10));
+
+  const dbMap = {};
+  if (dbRows) {
+    dbRows.forEach(row => { dbMap[row.mese] = { f: row.ferie_ore, p: row.permessi_ore }; });
+  }
 
   const mesi = [];
   let runningF = apFerie;
@@ -59,9 +69,9 @@ function calcola(anno, rows, apFerieOverride, apPermessiOverride) {
     const col = i + 2; // 0 etichetta, 1 AP, 2..13 mesi
     const matF = parseIT(ferieRow[col]);
     const matP = parseIT(permRow[col]);
-    const saved = salvati[MESI[i]];
-    const godF = saved !== undefined ? parseIT(saved.f) : parseIT(godFRow[col]);
-    const godP = saved !== undefined ? parseIT(saved.p) : parseIT(godPRow[col]);
+    const saved = dbMap[MESI[i]];
+    const godF = saved !== undefined ? parseFloat(saved.f) : parseIT(godFRow[col]);
+    const godP = saved !== undefined ? parseFloat(saved.p) : parseIT(godPRow[col]);
 
     runningF += (matF - godF);
     runningP += (matP - godP);
@@ -81,7 +91,6 @@ function calcola(anno, rows, apFerieOverride, apPermessiOverride) {
 function render(dati) {
   tbody.innerHTML = '';
 
-  // Riga AP
   const trAP = document.createElement('tr');
   trAP.className = 'row-ap';
   trAP.innerHTML = `
@@ -106,7 +115,6 @@ function render(dati) {
     tbody.appendChild(tr);
   });
 
-  // Preseleziona mese corrente
   meseSel.value = MESI[new Date().getMonth()];
   ferieIn.value = '';
   permessiIn.value = '';
@@ -118,33 +126,7 @@ async function caricaAnno(anno) {
   tbody.innerHTML = '';
 
   try {
-    const r = await fetch(`data/${anno}.csv`);
-    if (!r.ok) throw new Error('CSV non trovato per ' + anno);
-    const text = await r.text();
-    const rows = parseCSV(text);
-
-    let apFerie = parseIT(rows[1]?.[1]);
-    let apPermessi = parseIT(rows[2]?.[1]);
-
-    // Se AP è zero/mancante e esiste l'anno precedente, usa il suo residuo di dicembre
-    const annoPrev = (parseInt(anno, 10) - 1).toString();
-    if ((apFerie === 0 && apPermessi === 0) && anni.includes(annoPrev)) {
-      if (cache[annoPrev]) {
-        apFerie = cache[annoPrev].mesi[11].resF;
-        apPermessi = cache[annoPrev].mesi[11].resP;
-      } else {
-        const r2 = await fetch(`data/${annoPrev}.csv`);
-        if (r2.ok) {
-          const prev = calcola(annoPrev, parseCSV(await r2.text()));
-          cache[annoPrev] = prev;
-          apFerie = prev.mesi[11].resF;
-          apPermessi = prev.mesi[11].resP;
-        }
-      }
-    }
-
-    const dati = calcola(anno, rows, apFerie, apPermessi);
-    cache[anno] = dati;
+    const dati = await calcola(anno);
     render(dati);
     show('', 'info');
   } catch (e) {
@@ -174,61 +156,28 @@ async function loadAnni() {
   caricaAnno(currentAnno);
 }
 
-function esportaDati() {
-  const dati = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith('mf_goduti_')) {
-      const anno = key.replace('mf_goduti_', '');
-      dati[anno] = JSON.parse(localStorage.getItem(key));
-    }
-  }
-  const blob = new Blob([JSON.stringify(dati, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `mie-ferie-backup-${new Date().toISOString().slice(0,10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-  show('Backup esportato. Caricalo sugli altri dispositivi con "Importa dati".', 'ok');
-}
-
-function importaDati(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    try {
-      const dati = JSON.parse(ev.target.result);
-      let count = 0;
-      for (const anno in dati) {
-        if (dati.hasOwnProperty(anno)) {
-          localStorage.setItem('mf_goduti_' + anno, JSON.stringify(dati[anno]));
-          count++;
-        }
-      }
-      show('Importati dati di ' + count + ' anno/i. Ricaricando...', 'ok');
-      fileImport.value = '';
-      caricaAnno(currentAnno || anni[anni.length - 1]);
-    } catch (err) {
-      show('File non valido o corrotto.', 'err');
-    }
-  };
-  reader.readAsText(file);
-}
-
-form.addEventListener('submit', (e) => {
+form.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!currentAnno) return;
 
   const mese = meseSel.value;
-  const f = ferieIn.value;
-  const p = permessiIn.value;
+  const f = parseFloat(ferieIn.value) || 0;
+  const p = parseFloat(permessiIn.value) || 0;
 
-  const key = 'mf_goduti_' + currentAnno;
-  const salvati = JSON.parse(localStorage.getItem(key) || '{}');
-  salvati[mese] = { f: f, p: p };
-  localStorage.setItem(key, JSON.stringify(salvati));
+  const { error } = await supabase
+    .from('ferie_mensili')
+    .upsert({
+      anno: parseInt(currentAnno, 10),
+      mese: mese,
+      ferie_ore: f,
+      permessi_ore: p,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'anno, mese' });
+
+  if (error) {
+    show('Errore nel salvataggio: ' + error.message, 'err');
+    return;
+  }
 
   show('Salvato per ' + meseSel.options[meseSel.selectedIndex].text, 'ok');
   ferieIn.value = '';
@@ -238,8 +187,5 @@ form.addEventListener('submit', (e) => {
 });
 
 annoSel.addEventListener('change', (e) => caricaAnno(e.target.value));
-
-btnEsporta.addEventListener('click', esportaDati);
-fileImport.addEventListener('change', importaDati);
 
 loadAnni();
