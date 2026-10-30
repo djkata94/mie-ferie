@@ -192,16 +192,32 @@ async function calcolaAnno(anno) {
     apValori = { ferie: apFerie, permessi: apPermessi };
   }
 
-  // --- Suggerimento AP: residuo dicembre dell'anno precedente ---
+  // --- Suggerimento AP: residuo dicembre dell'anno precedente (letto direttamente dal CSV) ---
   let suggerimentoF = 0;
   let suggerimentoP = 0;
   const annoPrev = (parseInt(anno, 10) - 1).toString();
   if (anni.includes(annoPrev)) {
     try {
-      const prevDati = await calcolaAnno(annoPrev);
-      if (prevDati && prevDati.mesi && prevDati.mesi[11]) {
-        suggerimentoF = prevDati.mesi[11].resF;
-        suggerimentoP = prevDati.mesi[11].resP;
+      const rPrev = await fetch(`data/Mie Ferie - ${annoPrev}.csv`);
+      if (rPrev.ok) {
+        const prevRows = parseCSV(await rPrev.text());
+        // Cerca le righe con le residue teoriche e prendi l'ultimo valore numerico
+        for (let r = 0; r < prevRows.length; r++) {
+          const row = prevRows[r];
+          const joined = row.join(' ').toUpperCase();
+          if (joined.includes('FERIE RESIDUE TEORIC')) {
+            for (let c = row.length - 1; c >= 0; c--) {
+              const v = parseIT(row[c]);
+              if (String(row[c]) !== '' && !isNaN(v)) { suggerimentoF = v; break; }
+            }
+          }
+          if (joined.includes('PERMESSI RESIDUI TEORIC')) {
+            for (let c = row.length - 1; c >= 0; c--) {
+              const v = parseIT(row[c]);
+              if (String(row[c]) !== '' && !isNaN(v)) { suggerimentoP = v; break; }
+            }
+          }
+        }
       }
     } catch (e) {
       // ignorato: suggerimento resta 0
