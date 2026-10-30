@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mie Ferie &amp; Permessi</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="bar">
+      <h1>Mie Ferie &amp; Permessi</h1>
+      <div class="anno-sel">
+        <label for="anno">Anno</label>
+        <select id="anno"></select>
+      </div>
+    </header>
+
+    <div id="msg" class="msg"></div>
+
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Mese</th>
+            <th>Godute Ferie</th>
+            <th>Godute Permessi</th>
+            <th>Resid. Ferie</th>
+            <th>Resid. Permessi</th>
+            <th>Totale Residuo</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="card form-card">
+      <form id="form">
+        <div class="row">
+          <label>Mese</label>
+          <select id="mese" required>
+            <option value="GENNAIO">Gennaio</option>
+            <option value="FEBBRAIO">Febbraio</option>
+            <option value="MARZO">Marzo</option>
+            <option value="APRILE">Aprile</option>
+            <option value="MAGGIO">Maggio</option>
+            <option value="GIUGNO">Giugno</option>
+            <option value="LUGLIO">Luglio</option>
+            <option value="AGOSTO">Agosto</option>
+            <option value="SETTEMBRE">Settembre</option>
+            <option value="OTTOBRE">Ottobre</option>
+            <option value="NOVEMBRE">Novembre</option>
+            <option value="DICEMBRE">Dicembre</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Ferie godute (h)</label>
+          <input type="number" id="ferie" step="0.01" min="0" required>
+        </div>
+        <div class="row">
+          <label>Permessi goduti (h)</label>
+          <input type="number" id="permessi" step="0.01" min="0" required>
+        </div>
+        <div class="row">
+          <button type="submit">Salva</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
