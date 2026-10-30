@@ -138,3 +138,84 @@ button:disabled { background: #9a9584; cursor: not-allowed; opacity: 0.5; }
 .msg.ok { background: rgba(22,163,74,0.15); color: #4ade80; border-color: #4ade80; display: block; }
 .msg.err { background: rgba(248,113,113,0.15); color: #f87171; border-color: #f87171; display: block; }
 .msg.info { background: rgba(59,130,246,0.15); color: #60a5fa; border-color: #60a5fa; display: block; }
+
+/* Barra AP */
+.ap-bar {
+  display: none;
+  margin: 10px 0 14px 0;
+  padding: 10px 14px;
+  background: #1b1c15;
+  border: 1px solid rgba(238,231,216,0.10);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ap-bar span { color: #9a9584; font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.ap-val { color: #c99a4a; font-weight: 700; font-family: 'IBM Plex Mono', monospace; }
+.ap-bar button {
+  margin-left: auto;
+  font-size: 0.75rem;
+  padding: 6px 14px;
+}
+
+/* Popup AP */
+.popup {
+  position: fixed;
+  inset: 0;
+  background: rgba(18,19,9,0.85);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  backdrop-filter: blur(4px);
+}
+.popup-content {
+  background: #121309;
+  border: 1px solid rgba(201,154,74,0.45);
+  border-radius: 8px;
+  padding: 22px;
+  min-width: 320px;
+  color: #eee7d6;
+  font-family: 'IBM Plex Sans', sans-serif;
+  position: relative;
+}
+.popup-content h3 {
+  margin: 0 0 8px 0;
+  font-family: 'Fraunces', serif;
+  font-size: 1.25rem;
+  color: #c99a4a;
+}
+.popup-content p {
+  margin: 0 0 14px 0;
+  font-size: 0.85rem;
+  color: #9a9584;
+}
+.popup-content label {
+  display: block;
+  margin: 0 0 6px 0;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #c99a4a;
+}
+.popup-content input {
+  width: 100%;
+  padding: 8px;
+  background: #1b1c15;
+  border: 1px solid rgba(238,231,216,0.10);
+  border-radius: 4px;
+  color: #eee7d6;
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+.popup-btns {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.popup-btns button {
+  font-size: 0.8rem;
+  padding: 7px 16px;
+}

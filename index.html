@@ -26,6 +26,13 @@
 
   <div id="msg" class="msg"></div>
 
+  <!-- Barra AP: visibile quando l'AP dell'anno non è ancora bloccato -->
+  <div id="apBar" class="ap-bar">
+    <span id="apLabel">AP (Anno Prec.):</span>
+    <span id="apVal" class="ap-val">non impostato</span>
+    <button id="btnModificaAP" onclick="apriPopupAP(currentAnno, 0, 0)">Imposta AP</button>
+  </div>
+
   <div class="table-container">
     <table id="dataGrid">
       <thead>
@@ -64,6 +71,21 @@
     <button id="btnSalva" onclick="inviaDati()">Salva</button>
   </div>
   <p id="status" style="font-size:0.85rem; color:var(--brass); text-align:center; min-height: 20px; margin-top:15px; font-family:'IBM Plex Mono', monospace;"></p>
+</div>
+
+<!-- Popup per impostare AP (Anno Precedente) -->
+<div id="popupAP" class="popup">
+  <div class="popup-content">
+    <h3>Imposta AP (Anno Prec.) per <span id="apAnno"></span></h3>
+    <p>Inserisci i valori di partenza ereditati dall'anno precedente.</p>
+    <label>Ferie AP (ore): <input type="number" id="apFerie" step="0.01"></label>
+    <label>Permessi AP (ore): <input type="number" id="apPermessi" step="0.01"></label>
+    <div class="popup-btns">
+      <button id="btnConfermaAP">Conferma e blocca</button>
+      <button type="button" id="btnAnnullaAP">Annulla</button>
+    </div>
+    <p id="apMsg" style="color:#f87171; font-size:0.8rem; margin-top:8px;"></p>
+  </div>
 </div>
 
 <script src="app.js"></script>

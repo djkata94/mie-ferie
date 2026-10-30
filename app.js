@@ -1,18 +1,32 @@
 const MESI = ["GENNAIO","FEBBRAIO","MARZO","APRILE","MAGGIO","GIUGNO","LUGLIO","AGOSTO","SETTEMBRE","OTTOBRE","NOVEMBRE","DICEMBRE"];
 const MESI_LABEL = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
+const ANNO_AP_TABLE = 'anno_ap';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let anni = [];
 let currentAnno = null;
+let apBloccato = false;
+let apValori = { ferie: 0, permessi: 0 };
 
 const selAnno = document.getElementById('selAnno');
+const apBar = document.getElementById('apBar');
+const apLabel = document.getElementById('apLabel');
+const apVal = document.getElementById('apVal');
+const btnModificaAP = document.getElementById('btnModificaAP');
 const mese = document.getElementById('mese');
 const ferie = document.getElementById('ferie');
 const permessi = document.getElementById('permessi');
 const btnSalva = document.getElementById('btnSalva');
 const status = document.getElementById('status');
 const gridBody = document.getElementById('gridBody');
+const popupAP = document.getElementById('popupAP');
+const apAnnoSpan = document.getElementById('apAnno');
+const apFerieInput = document.getElementById('apFerie');
+const apPermessiInput = document.getElementById('apPermessi');
+const btnConfermaAP = document.getElementById('btnConfermaAP');
+const btnAnnullaAP = document.getElementById('btnAnnullaAP');
+const apMsg = document.getElementById('apMsg');
 
 function show(testo, tipo = 'info') {
   status.textContent = testo;
@@ -34,22 +48,86 @@ function parseCSV(text) {
   return text.split('\n').map(line => line.split(',').map(c => c.replace(/^"|"$/g, '').trim()));
 }
 
-// Cerca in una riga del CSV l'ultimo valore numerico (residuo teorico)
-function trovaResiduoTeorico(rows, etichetta) {
-  for (let r = 0; r < rows.length; r++) {
-    if (!rows[r]) continue;
-    const trovata = rows[r].some(cell => String(cell).includes(etichetta));
-    if (trovata) {
-      for (let c = rows[r].length - 1; c >= 0; c--) {
-        const v = parseIT(rows[r][c]);
-        if (String(rows[r][c]) !== '' && !isNaN(v)) return v;
-      }
+// Legge AP da Supabase (tabella anno_ap). Restituisce null se non esiste.
+async function caricaAP(anno) {
+  try {
+    const { data, error } = await sb
+      .from(ANNO_AP_TABLE)
+      .select('ap_ferie, ap_permessi, bloccato')
+      .eq('anno', parseInt(anno, 10))
+      .maybeSingle();
+    if (error) {
+      console.error('Errore caricaAP:', error);
+      return null;
     }
+    return data;
+  } catch (e) {
+    console.error('Eccezione caricaAP:', e);
+    return null;
   }
-  return 0;
 }
 
-// Calcola residui per un anno: AP + maturazione (CSV) - goduto (Supabase)
+// Salva/blocca AP su Supabase.
+async function salvaAP(anno, ferie, permessi) {
+  const { error } = await sb
+    .from(ANNO_AP_TABLE)
+    .upsert({
+      anno: parseInt(anno, 10),
+      ap_ferie: parseFloat(ferie) || 0,
+      ap_permessi: parseFloat(permessi) || 0,
+      bloccato: true,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'anno' });
+  if (error) throw error;
+}
+
+function chiudiPopupAP() {
+  popupAP.style.display = 'none';
+  apMsg.textContent = '';
+}
+
+btnAnnullaAP.addEventListener('click', chiudiPopupAP);
+popupAP.addEventListener('click', (e) => {
+  if (e.target === popupAP) chiudiPopupAP();
+});
+
+function apriPopupAP(anno, suggerimentoF, suggerimentoP) {
+  apAnnoSpan.textContent = anno;
+  apFerieInput.value = suggerimentoF !== undefined ? suggerimentoF : '';
+  apPermessiInput.value = suggerimentoP !== undefined ? suggerimentoP : '';
+  apMsg.textContent = '';
+  popupAP.style.display = 'flex';
+  apFerieInput.focus();
+}
+
+btnConfermaAP.addEventListener('click', async () => {
+  const anno = apAnnoSpan.textContent;
+  const f = apFerieInput.value;
+  const p = apPermessiInput.value;
+  if (f === '' && p === '') {
+    apMsg.textContent = 'Inserisci almeno un valore.';
+    return;
+  }
+  btnConfermaAP.disabled = true;
+  try {
+    await salvaAP(anno, f, p);
+    apBloccato = true;
+    apValori = { ferie: parseFloat(f) || 0, permessi: parseFloat(p) || 0 };
+    chiudiPopupAP();
+    show('AP salvato e bloccato.', 'ok');
+    caricaGriglia();
+  } catch (e) {
+    show('Errore salvataggio AP: ' + e.message, 'err');
+  } finally {
+    btnConfermaAP.disabled = false;
+  }
+});
+
+// Calcola residui per un anno, replicando le formule del foglio Google:
+//   C7 = SUM(B2:C2)+SUM(B3:C3)-C5-C6
+//   D7 = C7+SUM(D2:D3)-D5-D6   (ecc. per ogni mese)
+//   O9 = O2-O5   (ferie residue teoriche)
+//   O10 = O3-O6  (permessi residue teoriche)
 async function calcolaAnno(anno) {
   const r = await fetch(`data/Mie Ferie - ${anno}.csv`);
   if (!r.ok) throw new Error('CSV non trovato per ' + anno);
@@ -60,22 +138,46 @@ async function calcolaAnno(anno) {
   const godFRow = rows[4] || [];
   const godPRow = rows[5] || [];
 
-  // AP: se presente nel CSV (colonna B, indice 1) usa quello
+  // --- AP: leggi da CSV (colonna B, indice 1) se presente e non vuoto ---
   let apFerie = parseIT(ferieRow[1]);
   let apPermessi = parseIT(permRow[1]);
+  const apCSVVuoto = String(ferieRow[1]).trim() === '' && String(permRow[1]).trim() === '';
 
-  // Se AP mancante e esiste anno precedente, prendi residuo teorico anno precedente
+  let apDaSupabase = null;
+  if (apCSVVuoto) {
+    apDaSupabase = await caricaAP(anno);
+    if (apDaSupabase) {
+      apFerie = parseFloat(apDaSupabase.ap_ferie) || 0;
+      apPermessi = parseFloat(apDaSupabase.ap_permessi) || 0;
+      apBloccato = apDaSupabase.bloccato === true;
+      apValori = { ferie: apFerie, permessi: apPermessi };
+    } else {
+      apBloccato = false;
+      apValori = { ferie: 0, permessi: 0 };
+    }
+  } else {
+    // AP presente nel CSV: consideriamolo già definito (bloccato)
+    apBloccato = true;
+    apValori = { ferie: apFerie, permessi: apPermessi };
+  }
+
+  // --- Suggerimento AP: residuo dicembre dell'anno precedente, se esiste ---
+  let suggerimentoF = 0;
+  let suggerimentoP = 0;
   const annoPrev = (parseInt(anno, 10) - 1).toString();
-  if ((apFerie === 0 && apPermessi === 0) && anni.includes(annoPrev)) {
-    const r2 = await fetch(`data/Mie Ferie - ${annoPrev}.csv`);
-    if (r2.ok) {
-      const prevRows = parseCSV(await r2.text());
-      apFerie = trovaResiduoTeorico(prevRows, 'FERIE RESIDUE TEORICHE') || 0;
-      apPermessi = trovaResiduoTeorico(prevRows, 'PERMESSI RESIDUI TEORICI') || 0;
+  if (!apBloccato && anni.includes(annoPrev)) {
+    try {
+      const prevDati = await calcolaAnno(annoPrev);
+      if (prevDati && prevDati.mesi && prevDati.mesi[11]) {
+        suggerimentoF = prevDati.mesi[11].resF;
+        suggerimentoP = prevDati.mesi[11].resP;
+      }
+    } catch (e) {
+      // ignorato: suggerimento resta 0
     }
   }
 
-  // Carica goduti da Supabase
+  // --- Carica goduti da Supabase ---
   const { data: dbRows } = await sb
     .from('ferie_mensili')
     .select('mese, ferie_ore, permessi_ore')
@@ -109,23 +211,42 @@ async function calcolaAnno(anno) {
     });
   }
 
-  return { anno, apFerie, apPermessi, mesi };
+  return { anno, apFerie, apPermessi, apBloccato, mesi, suggerimentoF, suggerimentoP };
 }
 
 function render(dati) {
   gridBody.innerHTML = '';
 
-  // Riga AP
-  const trAP = document.createElement('tr');
-  trAP.className = 'row-ap';
-  trAP.innerHTML = `
-    <td>AP (Anno Prec.)</td>
-    <td class="god-val">- / -</td>
-    <td class="res-val">${fmtIT(dati.apFerie)}h</td>
-    <td class="res-val">${fmtIT(dati.apPermessi)}h</td>
-    <td class="tot-val">${fmtIT(dati.apFerie + dati.apPermessi)}h</td>
-  `;
-  gridBody.appendChild(trAP);
+  // Barra AP: mostra se bloccato o bottone per impostare
+  if (dati.apBloccato) {
+    apBar.style.display = 'none';
+    // Riga AP nella tabella (valore bloccato, solo lettura)
+    const trAP = document.createElement('tr');
+    trAP.className = 'row-ap';
+    trAP.innerHTML = `
+      <td>AP (Anno Prec.)</td>
+      <td class="god-val">- / -</td>
+      <td class="res-val">${fmtIT(dati.apFerie)}h</td>
+      <td class="res-val">${fmtIT(dati.apPermessi)}h</td>
+      <td class="tot-val">${fmtIT(dati.apFerie + dati.apPermessi)}h</td>
+    `;
+    gridBody.appendChild(trAP);
+  } else {
+    apBar.style.display = 'block';
+    apLabel.textContent = 'AP (Anno Prec.):';
+    apVal.textContent = 'non impostato';
+    // Riga AP nella tabella (input visivi tramite barra esterna)
+    const trAP = document.createElement('tr');
+    trAP.className = 'row-ap';
+    trAP.innerHTML = `
+      <td>AP (Anno Prec.)</td>
+      <td class="god-val">- / -</td>
+      <td class="res-val">-</td>
+      <td class="res-val">-</td>
+      <td class="tot-val">-</td>
+    `;
+    gridBody.appendChild(trAP);
+  }
 
   dati.mesi.forEach(m => {
     const tr = document.createElement('tr');
@@ -150,10 +271,20 @@ async function caricaGriglia() {
   currentAnno = anno;
   show('Caricamento...', 'info');
   gridBody.innerHTML = '';
+  apBar.style.display = 'none';
 
   try {
     const dati = await calcolaAnno(anno);
     render(dati);
+
+    // Se AP non bloccato e non c'è valore, mostra popup dopo un brevissimo ritardo
+    // così l'utente vede prima la griglia e poi il suggerimento.
+    if (!dati.apBloccato && (dati.apFerie === 0 && dati.apPermessi === 0)) {
+      setTimeout(() => {
+        apriPopupAP(anno, dati.suggerimentoF, dati.suggerimentoP);
+      }, 300);
+    }
+
     show('', 'info');
   } catch (e) {
     show('Errore nel caricamento: ' + e.message, 'err');
