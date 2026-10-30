@@ -1,7 +1,7 @@
 const MESI = ["GENNAIO","FEBBRAIO","MARZO","APRILE","MAGGIO","GIUGNO","LUGLIO","AGOSTO","SETTEMBRE","OTTOBRE","NOVEMBRE","DICEMBRE"];
 const MESI_LABEL = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let anni = [];
 let currentAnno = null;
@@ -76,7 +76,7 @@ async function calcolaAnno(anno) {
   }
 
   // Carica goduti da Supabase
-  const { data: dbRows } = await supabase
+  const { data: dbRows } = await sb
     .from('ferie_mensili')
     .select('mese, ferie_ore, permessi_ore')
     .eq('anno', parseInt(anno, 10));
@@ -169,7 +169,7 @@ async function inviaDati() {
   show('Invio in corso...', 'info');
 
   try {
-    const { error } = await supabase
+    const { error } = await sb
       .from('ferie_mensili')
       .upsert({
         anno: parseInt(anno, 10),
