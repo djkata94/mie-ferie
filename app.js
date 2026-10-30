@@ -196,7 +196,7 @@ async function calcolaAnno(anno) {
   let suggerimentoF = 0;
   let suggerimentoP = 0;
   const annoPrev = (parseInt(anno, 10) - 1).toString();
-  if (!apBloccato && anni.includes(annoPrev)) {
+  if (anni.includes(annoPrev)) {
     try {
       const prevDati = await calcolaAnno(annoPrev);
       if (prevDati && prevDati.mesi && prevDati.mesi[11]) {
