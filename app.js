@@ -51,7 +51,7 @@ function trovaResiduoTeorico(rows, etichetta) {
 
 // Calcola residui per un anno: AP + maturazione (CSV) - goduto (Supabase)
 async function calcolaAnno(anno) {
-  const r = await fetch(`data/${anno}.csv`);
+  const r = await fetch(`data/Mie Ferie - ${anno}.csv`);
   if (!r.ok) throw new Error('CSV non trovato per ' + anno);
   const rows = parseCSV(await r.text());
 
@@ -67,7 +67,7 @@ async function calcolaAnno(anno) {
   // Se AP mancante e esiste anno precedente, prendi residuo teorico anno precedente
   const annoPrev = (parseInt(anno, 10) - 1).toString();
   if ((apFerie === 0 && apPermessi === 0) && anni.includes(annoPrev)) {
-    const r2 = await fetch(`data/${annoPrev}.csv`);
+    const r2 = await fetch(`data/Mie Ferie - ${annoPrev}.csv`);
     if (r2.ok) {
       const prevRows = parseCSV(await r2.text());
       apFerie = trovaResiduoTeorico(prevRows, 'FERIE RESIDUE TEORICHE') || 0;
