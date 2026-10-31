@@ -5,8 +5,8 @@ Sito statico personale per tracciare ferie e permessi aziendali, replicando fede
 ## Stack
 
 - **Frontend**: HTML/CSS/JS vanilla (nessun build step, si apre direttamente `index.html`)
-- **Backend/DB**: Supabase (Postgres) con tabelle `ferie_mensili` e `anno_ap`
-- **Dati storici**: CSV in `data/` (esportati dal foglio Google, uno per anno)
+- **Backend/DB**: Supabase (Postgres) con tabelle `anni`, `ferie_mensili`, `anno_ap`, `maturazione_mensile`
+- **Dati storici**: CSV in `data/` (esportati dal foglio Google, uno per anno) + script di importazione in Supabase
 
 ## Setup Supabase
 
@@ -30,13 +30,34 @@ create table if not exists anno_ap (
   ap_ferie numeric default 0,
   ap_permessi numeric default 0,
   bloccato boolean default false,
+  ap_configurato boolean default false,
   updated_at timestamptz default now()
+);
+
+-- Anni disponibili (gestiti dal sito con il popup "Gestisci anni" )
+create table if not exists anni (
+  anno integer primary key,
+  created_at timestamptz default now()
+);
+
+-- Maturazione mensile (importata dai CSV con scripts/load_maturation.js)
+create table if not exists maturazione_mensile (
+  anno integer not null,
+  mese text not null,
+  ferie_maturata numeric default 0,
+  permessi_maturati numeric default 0,
+  updated_at timestamptz default now(),
+  primary key (anno, mese)
 );
 
 alter table ferie_mensili enable row level security;
 alter table anno_ap enable row level security;
+alter table anni enable row level security;
+alter table maturazione_mensile enable row level security;
 create policy "ferie_mensili_all" on ferie_mensili for all using (true);
 create policy "anno_ap_all" on anno_ap for all using (true);
+create policy "anni_all" on anni for all using (true);
+create policy "maturazione_mensile_all" on maturazione_mensile for all using (true);
 ```
 
 3. Inserisci URL e anon key in `supabase-config.js`.
@@ -68,24 +89,41 @@ Per gli anni in cui `B2`/`B3` del CSV sono vuoti (es. 2027+), l'AP va impostato 
 ## Struttura file
 
 ```
-index.html          # UI (griglia, form, popup AP)
+index.html          # UI (griglia, form, popup AP, popup anni, popup importazione)
 style.css           # stile scuro "ledger"
-app.js              # logica di calcolo, Supabase, popup AP
+app.js              # logica di calcolo, Supabase, popup
 supabase-config.js  # URL e anon key Supabase
 data/
-  anni.json         # lista anni disponibili (da aggiornare manualmente)
+  anni.json         # fallback legacy (il sito usa la tabella "anni" di Supabase)
   Mie Ferie - 2026.csv
   Mie Ferie - 2027.csv
   ...
+scripts/
+  load_maturation.js  # importa la maturazione dai CSV a Supabase (nessuna dipendenza)
 ```
+
+## Importare la maturazione dai CSV a Supabase
+
+Lo script `scripts/load_maturation.js` legge tutti i file `data/Mie Ferie - YYYY.csv`,
+estrae le righe di maturazione (ferie e permessi per i 12 mesi) e le inserisce nella
+tabella `maturazione_mensile` (upsert, quindi rieseguibile senza duplicati). Inserisce
+anche gli anni nella tabella `anni`, così appaiono subito nel sito.
+
+Requisiti: **Node.js 18+** (nessun `npm install`, lo script usa solo moduli integrati).
+
+```bash
+cd mie-ferie
+node scripts/load_maturation.js
+```
+
+Dopo l'importazione il sito legge la maturazione da Supabase; i CSV restano come
+fallback/backward-compatibilità (e per i goduti storici).
 
 ## Aggiungere un nuovo anno
 
-1. Esporta il nuovo foglio anno dal Google Sheet in CSV (`File > Scarica > Valori separati da virgola`).
-2. Salvalo in `data/` come `Mie Ferie - <ANNO>.csv`.
-3. Aggiungi l'anno a `data/anni.json`.
-4. Fai commit/push.
-5. Apri il sito, seleziona il nuovo anno e imposta l'AP dal popup (verrà suggerito automaticamente il residuo dicembre dell'anno precedente).
+1. Tasto **⚙** nel sito (accanto al selettore anni) → **Aggiungi** l'anno. Viene salvato su Supabase e selezionato.
+2. Imposta l'AP dal popup (verrà suggerito automaticamente il residuo dicembre dell'anno precedente, se disponibile).
+3. Per la maturazione: esporta il foglio anno dal Google Sheet in CSV, salvalo come `data/Mie Ferie - <ANNO>.csv` ed esegui `node scripts/load_maturation.js` (oppure usa il popup **📁** nel sito per caricare il singolo CSV dall'interfaccia).
 
 ---
 
@@ -93,36 +131,16 @@ data/
 
 Di seguito le migliorie pianificate/proposte, in ordine di importanza:
 
-### 1. Architettura: sostituire i CSV con Supabase ⭐ (priorità alta)
-Migrare anche la maturazione (righe ferie/permessi dei CSV) su Supabase e aggiungere un pannello admin da sito per inserire i valori di maturazione per mese/anno. A quel punto:
-- non servono più CSV esportati a mano
-- non serve più il Google Sheet (o diventa solo un backup)
-- aggiungere un anno diventa una voce di menu, non un commit
+### 1. Architettura: sostituire i CSV con Supabase ✅ (fatto)
+Migrazione realizzata: la maturazione vive nella tabella `maturazione_mensile` ed è
+importabile con `scripts/load_maturation.js` (o dal popup 📁 nel sito). Rimane da
+valutare un eventuale pannello admin per modificare la maturazione direttamente da UI.
+- i CSV non servono più dopo l'importazione (restano come backup)
+- il Google Sheet diventa solo un backup
 
-**SQL Supabase per `maturazione_mensile` (nuova tabella):**
-```sql
-create table if not exists maturazione_mensile (
-  anno integer not null,
-  mese text not null,
-  ferie_maturata numeric default 0,
-  permessi_maturati numeric default 0,
-  updated_at timestamptz default now(),
-  primary key (anno, mese)
-);
-alter table maturazione_mensile enable row level security;
-create policy "maturazione_mensile_all" on maturazione_mensile for all using (true);
-```
-
-**Aggiornare la tabella `anno_ap` per aggiungere un flag `ap_configurato`:**
-```sql
--- Aggiungere la colonna se non esiste (esegui una sola volta)
-ALTER TABLE IF EXISTS anno_ap ADD COLUMN ap_configurato boolean default false;
-```
-
-**Note:** dopo questa modifica, l'AP di un anno sarà trattato come "non configurato" finché `ap_configurato = false`. Quando l'utente imposta AP dal popup, lo script imposta `bloccato = true` **e** `ap_configurato = true`.
-
-### 2. Gestione anni dinamica da Supabase ⭐ (priorità alta)
-Derivare la lista degli anni da Supabase (es. `select distinct anno`) oppure tabella `anni` gestibile da sito. Elimina la modifica manuale di `anni.json`. Con un bottone "＋ Nuovo anno" si apre direttamente il popup AP.
+### 2. Gestione anni dinamica da Supabase ✅ (fatto)
+La lista anni viene dalla tabella `anni`, gestibile dal sito con il pulsante ⚙
+(popup "Gestisci anni" con Aggiungi/Rimuovi). `anni.json` resta solo come fallback.
 
 ### 3. Sistema di blocco AP più pulito
 Aggiungere un campo esplicito `ap_configurato` (boolean) separato dai valori, per eliminare l'attuale workaround "se bloccato ma zero, tratto come non bloccato".

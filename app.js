@@ -35,12 +35,80 @@ const nuovoAnnoInput = document.getElementById('nuovoAnno');
 const btnAggiungiAnno = document.getElementById('btnAggiungiAnno');
 const btnChiudiAnni = document.getElementById('btnChiudiAnni');
 const anniMsg = document.getElementById('anniMsg');
+const popupMaturation = document.getElementById('popupMaturation');
+const maturationFileInput = document.getElementById('maturationFileInput');
+const btnImportaMaturation = document.getElementById('btnImportaMaturation');
+const btnChiudiMaturation = document.getElementById('btnChiudiMaturation');
+const maturationMsg = document.getElementById('maturationMsg');
 
 function show(testo, tipo = 'info') {
   status.textContent = testo;
   status.style.color = tipo === 'ok' ? '#4ade80' : (tipo === 'err' ? '#f87171' : '#c99a4a');
   status.style.display = testo ? 'block' : 'none';
   if (tipo !== 'err') setTimeout(() => { status.style.display = 'none'; }, 3000);
+}
+
+// Popup per importazione maturazione
+function apriPopupMaturation() {
+  importMaturationOpen = true;
+  if (maturationFileInput) maturationFileInput.value = '';
+  if (maturationMsg) maturationMsg.textContent = '';
+  if (popupMaturation) popupMaturation.style.display = 'flex';
+}
+function chiudiPopupMaturation() {
+  importMaturationOpen = false;
+  if (maturationMsg) maturationMsg.textContent = '';
+  if (popupMaturation) popupMaturation.style.display = 'none';
+}
+async function importaMaturationDaFile() {
+  if (!maturationFileInput || !maturationFileInput.files || maturationFileInput.files.length === 0) {
+    if (maturationMsg) maturationMsg.textContent = 'Seleziona un file CSV';
+    return;
+  }
+  const file = maturationFileInput.files[0];
+  const testo = await new Promise((r, j) => {
+    const fr = new FileReader();
+    fr.onload = () => r(fr.result);
+    fr.onerror = () => j(fr.error);
+    fr.readAsText(file);
+  });
+
+  // Estrai l'anno dal nome del file (es. "Mie Ferie - 2026.csv")
+  const nomeFile = file.name;
+  const match = nomeFile.match(/Mie Ferie\s*-\s*(\d{4})\.csv/);
+  if (!match) {
+    if (maturationMsg) maturationMsg.textContent = 'Nome file non valido. Usa il formato "Mie Ferie - YYYY.csv"';
+    return;
+  }
+  const anno = match[1];
+
+  const rows = parseCSV(testo);
+  // Le righe 2 e 3 (indici 1,2) contengono le maturazioni per ogni mese (col C-N)
+  const rowFerie = rows[1] || [];
+  const rowPermessi = rows[2] || [];
+
+  const upsertRows = [];
+  for (let i = 0; i < 12; i++) {
+    const col = i + 2; // colonna C (indice 2) = Gennaio
+    const mese = MESI[i];
+    const f = parseIT(rowFerie[col]);
+    const p = parseIT(rowPermessi[col]);
+    upsertRows.push({ anno: parseInt(anno, 10), mese, ferie_maturata: f, permessi_maturati: p });
+  }
+
+  btnImportaMaturation.disabled = true;
+  try {
+    for (const r of upsertRows) {
+      await salvaMaturazione(r.anno, r.mese, r.ferie_maturata, r.permessi_maturati);
+    }
+    show('Dati di maturazione importati con successo per ' + anno, 'ok');
+    chiudiPopupMaturation();
+    caricaGriglia();
+  } catch (e) {
+    show('Errore durante l importazione: ' + e.message, 'err');
+  } finally {
+    btnImportaMaturation.disabled = false;
+  }
 }
 
 function parseIT(s) {
@@ -303,10 +371,12 @@ async function rimuoviAnnoDaUI(anno) {
 async function calcolaAnno(anno) {
   let ferieMaturazione = [], permMaturazione = [], godFRow = [], godPRow = [];
   let maturazioneCaricata = false;
+  let csvTrovato = false;
 
   try {
     const r = await fetch(`data/Mie Ferie - ${anno}.csv`);
     if (r.ok) {
+      csvTrovato = true;
       const rows = parseCSV(await r.text());
       // La maturazione dai CSV: righe 2 e 3 (indici 1,2)
       ferieMaturazione = rows[1] || [];
@@ -333,9 +403,13 @@ async function calcolaAnno(anno) {
   }
 
   // --- AP: leggi da CSV (colonna B, indice 1) se presente e non vuoto ---
+  // Nota: con maturazione da Supabase (o senza CSV) l'indice 1 e' undefined,
+  // va trattato come cella vuota altrimenti l'AP risulterebbe bloccato a zero.
+  const apFStr = ferieMaturazione[1] === undefined || ferieMaturazione[1] === null ? '' : String(ferieMaturazione[1]).trim();
+  const apPStr = permMaturazione[1] === undefined || permMaturazione[1] === null ? '' : String(permMaturazione[1]).trim();
   let apFerie = parseIT(ferieMaturazione[1]);
   let apPermessi = parseIT(permMaturazione[1]);
-  const apCSVVuoto = String(ferieMaturazione[1]).trim() === '' && String(permMaturazione[1]).trim() === '';
+  const apCSVVuoto = apFStr === '' && apPStr === '';
 
   let apDaSupabase = null;
   if (apCSVVuoto) {
@@ -420,7 +494,7 @@ async function calcolaAnno(anno) {
     });
   }
 
-  return { anno, apFerie, apPermessi, apBloccato, mesi, suggerimentoF, suggerimentoP, maturazioneCaricata };
+  return { anno, apFerie, apPermessi, apBloccato, mesi, suggerimentoF, suggerimentoP, maturazioneCaricata, csvTrovato };
 }
 
 function render(dati) {

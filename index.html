@@ -22,6 +22,7 @@
       <label>Anno</label>
       <select id="selAnno" onchange="caricaGriglia()"></select>
       <button id="btnGestisciAnni" class="btn-icon" title="Gestisci anni" onclick="apriPopupAnni()">⚙</button>
+      <button id="btnImportaMaturation" class="btn-icon" title="Importa maturazione da CSV" onclick="apriPopupMaturation()">📁</button>
     </div>
   </div>
 
@@ -103,6 +104,20 @@
       <button type="button" id="btnChiudiAnni">Chiudi</button>
     </div>
     <p id="anniMsg" style="color:#f87171; font-size:0.8rem; margin-top:8px;"></p>
+  </div>
+</div>
+
+<!-- Popup per importare i dati di maturazione -->
+<div id="popupMaturation" class="popup">
+  <div class="popup-content">
+    <h3>Importa Dati di Maturazione</h3>
+    <p>Seleziona un file CSV del tipo "Mie Ferie - YYYY.csv" per caricare i dati di maturazione (colonne ferie e permessi) in Supabase.</p>
+    <input type="file" id="maturationFileInput" accept=".csv" style="margin-bottom:12px;">
+    <div class="popup-btns">
+      <button id="btnImportaMaturation" onclick="importaMaturationDaFile()">Importa</button>
+      <button type="button" id="btnChiudiMaturation" onclick="chiudiPopupMaturation()">Annulla</button>
+    </div>
+    <p id="maturationMsg" style="color:#f87171; font-size:0.8rem; margin-top:8px;"></p>
   </div>
 </div>
 
