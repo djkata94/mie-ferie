@@ -99,6 +99,28 @@ Migrare anche la maturazione (righe ferie/permessi dei CSV) su Supabase e aggiun
 - non serve più il Google Sheet (o diventa solo un backup)
 - aggiungere un anno diventa una voce di menu, non un commit
 
+**SQL Supabase per `maturazione_mensile` (nuova tabella):**
+```sql
+create table if not exists maturazione_mensile (
+  anno integer not null,
+  mese text not null,
+  ferie_maturata numeric default 0,
+  permessi_maturati numeric default 0,
+  updated_at timestamptz default now(),
+  primary key (anno, mese)
+);
+alter table maturazione_mensile enable row level security;
+create policy "maturazione_mensile_all" on maturazione_mensile for all using (true);
+```
+
+**Aggiornare la tabella `anno_ap` per aggiungere un flag `ap_configurato`:**
+```sql
+-- Aggiungere la colonna se non esiste (esegui una sola volta)
+ALTER TABLE IF EXISTS anno_ap ADD COLUMN ap_configurato boolean default false;
+```
+
+**Note:** dopo questa modifica, l'AP di un anno sarà trattato come "non configurato" finché `ap_configurato = false`. Quando l'utente imposta AP dal popup, lo script imposta `bloccato = true` **e** `ap_configurato = true`.
+
 ### 2. Gestione anni dinamica da Supabase ⭐ (priorità alta)
 Derivare la lista degli anni da Supabase (es. `select distinct anno`) oppure tabella `anni` gestibile da sito. Elimina la modifica manuale di `anni.json`. Con un bottone "＋ Nuovo anno" si apre direttamente il popup AP.
 
