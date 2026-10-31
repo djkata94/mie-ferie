@@ -2,6 +2,7 @@ const MESI = ["GENNAIO","FEBBRAIO","MARZO","APRILE","MAGGIO","GIUGNO","LUGLIO","
 const MESI_LABEL = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
 const ANNO_AP_TABLE = 'anno_ap';
 const ANNI_TABLE = 'anni';
+const MATURAZIONE_TABLE = 'maturazione_mensile';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -84,7 +85,7 @@ function parseCSV(text) {
   return rows;
 }
 
-// Legge AP da Supabase. Restituisce sempre un oggetto (mai null).
+// Leggi dati dal Supabase
 async function caricaAP(anno) {
   try {
     const { data, error } = await sb
@@ -103,7 +104,24 @@ async function caricaAP(anno) {
   }
 }
 
-// Salva/blocca AP su Supabase.
+async function caricaMaturazione(anno) {
+  try {
+    const { data, error } = await sb
+      .from(MATURAZIONE_TABLE)
+      .select('mese, ferie_maturata, permessi_maturati')
+      .eq('anno', parseInt(anno, 10))
+      .order('mese', { ascending: true });
+    if (error) {
+      console.error('Errore caricaMaturazione:', error);
+      return null;
+    }
+    return data || null;
+  } catch (e) {
+    console.error('Eccezione caricaMaturazione:', e);
+    return null;
+  }
+}
+
 async function salvaAP(anno, ferie, permessi) {
   const { error } = await sb
     .from(ANNO_AP_TABLE)
@@ -114,6 +132,19 @@ async function salvaAP(anno, ferie, permessi) {
       bloccato: true,
       updated_at: new Date().toISOString()
     }, { onConflict: 'anno' });
+  if (error) throw error;
+}
+
+async function salvaMaturazione(anno, mese, ferie, permessi) {
+  const { error } = await sb
+    .from(MATURAZIONE_TABLE)
+    .upsert({
+      anno: parseInt(anno, 10),
+      mese,
+      ferie_maturata: parseFloat(ferie) || 0,
+      permessi_maturati: parseFloat(permessi) || 0,
+      updated_at: new Date().toISOString()
+    }, { onConflict: ['anno', 'mese'] });
   if (error) throw error;
 }
 
@@ -142,6 +173,7 @@ async function rimuoviAnno(anno) {
   if (error) throw error;
 }
 
+// Funzioni per il popup AP
 function chiudiPopupAP() {
   if (popupAP) popupAP.style.display = 'none';
   if (apMsg) apMsg.textContent = '';
@@ -267,34 +299,43 @@ async function rimuoviAnnoDaUI(anno) {
   }
 }
 
-// Calcola residui per un anno, replicando le formule del foglio Google:
-//   C7 = SUM(B2:C2)+SUM(B3:C3)-C5-C6
-//   D7 = C7+SUM(D2:D3)-D5-D6   (ecc. per ogni mese)
-//   O9 = O2-O5   (ferie residue teoriche)
-//   O10 = O3-O6  (permessi residue teoriche)
+// Calcola residui per un anno, replicando le formule del foglio Google (maturazione da Supabase)
 async function calcolaAnno(anno) {
-  let ferieRow = [], permRow = [], godFRow = [], godPRow = [];
-  let csvTrovato = true;
+  let ferieMaturazione = [], permMaturazione = [], godFRow = [], godPRow = [];
+  let maturazioneCaricata = false;
 
   try {
     const r = await fetch(`data/Mie Ferie - ${anno}.csv`);
-    if (!r.ok) {
-      csvTrovato = false;
-    } else {
+    if (r.ok) {
       const rows = parseCSV(await r.text());
-      ferieRow = rows[1] || [];
-      permRow = rows[2] || [];
+      // La maturazione dai CSV: righe 2 e 3 (indici 1,2)
+      ferieMaturazione = rows[1] || [];
+      permMaturazione = rows[2] || [];
+      // Goduti: righe 5 e 6 (indici 4,5)
       godFRow = rows[4] || [];
       godPRow = rows[5] || [];
     }
-  } catch (e) {
-    csvTrovato = false;
+  } catch (e) {}
+
+  // Carica maturazione da Supabase (se presente, sovrascrive CSV)
+  const matSupabase = await caricaMaturazione(anno);
+  if (matSupabase) {
+    ferieMaturazione = [];
+    permMaturazione = [];
+    for (let i = 0; i < 12; i++) {
+      const row = matSupabase.find(m => m.mese === MESI[i]);
+      if (row) {
+        ferieMaturazione[i + 2] = row.ferie_maturata; // colonna C (Gennaio)
+        permMaturazione[i + 2] = row.permessi_maturati;
+      }
+    }
+    maturazioneCaricata = true;
   }
 
   // --- AP: leggi da CSV (colonna B, indice 1) se presente e non vuoto ---
-  let apFerie = parseIT(ferieRow[1]);
-  let apPermessi = parseIT(permRow[1]);
-  const apCSVVuoto = String(ferieRow[1]).trim() === '' && String(permRow[1]).trim() === '';
+  let apFerie = parseIT(ferieMaturazione[1]);
+  let apPermessi = parseIT(permMaturazione[1]);
+  const apCSVVuoto = String(ferieMaturazione[1]).trim() === '' && String(permMaturazione[1]).trim() === '';
 
   let apDaSupabase = null;
   if (apCSVVuoto) {
@@ -314,7 +355,7 @@ async function calcolaAnno(anno) {
     apValori = { ferie: apFerie, permessi: apPermessi };
   }
 
-  // --- Suggerimento AP: residuo dicembre dell'anno precedente (letto direttamente dal CSV) ---
+  // --- Suggerimento AP: residuo dicembre dell'anno precedente ---
   let suggerimentoF = 0;
   let suggerimentoP = 0;
   const annoPrev = (parseInt(anno, 10) - 1).toString();
@@ -362,8 +403,8 @@ async function calcolaAnno(anno) {
 
   for (let i = 0; i < 12; i++) {
     const col = i + 2; // colonna C (indice 2) = Gennaio
-    const matF = parseIT(ferieRow[col]);
-    const matP = parseIT(permRow[col]);
+    const matF = parseIT(ferieMaturazione[col]);
+    const matP = parseIT(permMaturazione[col]);
     const saved = dbMap[MESI[i]];
     const godF = saved !== undefined ? saved.f : parseIT(godFRow[col]);
     const godP = saved !== undefined ? saved.p : parseIT(godPRow[col]);
@@ -379,17 +420,17 @@ async function calcolaAnno(anno) {
     });
   }
 
-  return { anno, apFerie, apPermessi, apBloccato, mesi, suggerimentoF, suggerimentoP, csvTrovato };
+  return { anno, apFerie, apPermessi, apBloccato, mesi, suggerimentoF, suggerimentoP, maturazioneCaricata };
 }
 
 function render(dati) {
   gridBody.innerHTML = '';
 
-  // Banner se CSV mancante
-  if (!dati.csvTrovato) {
+  // Banner se maturazione da Supabase (nessun CSV)
+  if (dati.maturazioneCaricata && !dati.csvTrovato) {
     const trInfo = document.createElement('tr');
     trInfo.className = 'row-info';
-    trInfo.innerHTML = `<td colspan="5" class="info-msg">⚠ Nessun CSV trovato per ${dati.anno}. Maturazione non disponibile. Goduti e AP si possono comunque inserire.</td>`;
+    trInfo.innerHTML = `<td colspan="5" class="info-msg">⚠ Maturazione caricata da Supabase. Nessun CSV per ${dati.anno}.</td>`;
     gridBody.appendChild(trInfo);
   }
 
@@ -519,12 +560,12 @@ function aggiornaSelectAnni() {
 }
 
 async function loadAnni() {
-  // Prova da Supabase
+  // Prova da Supabase (tabella anni)
   const anniSupabase = await caricaAnniDaSupabase();
   if (anniSupabase && anniSupabase.length > 0) {
     anni = anniSupabase;
   } else {
-    // Fallback a anni.json
+    // Fallback a anni.json (legacy)
     try {
       const r = await fetch('data/anni.json');
       if (r.ok) anni = await r.json();
