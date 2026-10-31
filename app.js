@@ -1,6 +1,7 @@
 const MESI = ["GENNAIO","FEBBRAIO","MARZO","APRILE","MAGGIO","GIUGNO","LUGLIO","AGOSTO","SETTEMBRE","OTTOBRE","NOVEMBRE","DICEMBRE"];
 const MESI_LABEL = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
 const ANNO_AP_TABLE = 'anno_ap';
+const ANNI_TABLE = 'anni';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -27,6 +28,12 @@ const apPermessiInput = document.getElementById('apPermessi');
 const btnConfermaAP = document.getElementById('btnConfermaAP');
 const btnAnnullaAP = document.getElementById('btnAnnullaAP');
 const apMsg = document.getElementById('apMsg');
+const popupAnni = document.getElementById('popupAnni');
+const listaAnni = document.getElementById('listaAnni');
+const nuovoAnnoInput = document.getElementById('nuovoAnno');
+const btnAggiungiAnno = document.getElementById('btnAggiungiAnno');
+const btnChiudiAnni = document.getElementById('btnChiudiAnni');
+const anniMsg = document.getElementById('anniMsg');
 
 function show(testo, tipo = 'info') {
   status.textContent = testo;
@@ -110,6 +117,31 @@ async function salvaAP(anno, ferie, permessi) {
   if (error) throw error;
 }
 
+// Gestione anni da Supabase
+async function caricaAnniDaSupabase() {
+  try {
+    const { data, error } = await sb.from(ANNI_TABLE).select('anno').order('anno', { ascending: true });
+    if (error) {
+      console.error('Errore caricaAnniDaSupabase:', error);
+      return null;
+    }
+    return data ? data.map(r => String(r.anno)) : null;
+  } catch (e) {
+    console.error('Eccezione caricaAnniDaSupabase:', e);
+    return null;
+  }
+}
+
+async function aggiungiAnno(anno) {
+  const { error } = await sb.from(ANNI_TABLE).upsert({ anno: parseInt(anno, 10) }, { onConflict: 'anno' });
+  if (error) throw error;
+}
+
+async function rimuoviAnno(anno) {
+  const { error } = await sb.from(ANNI_TABLE).delete().eq('anno', parseInt(anno, 10));
+  if (error) throw error;
+}
+
 function chiudiPopupAP() {
   if (popupAP) popupAP.style.display = 'none';
   if (apMsg) apMsg.textContent = '';
@@ -154,20 +186,110 @@ if (btnConfermaAP) btnConfermaAP.addEventListener('click', async () => {
   }
 });
 
+// Popup gestione anni
+function apriPopupAnni() {
+  aggiornaListaAnni();
+  if (popupAnni) popupAnni.style.display = 'flex';
+}
+
+function chiudiPopupAnni() {
+  if (popupAnni) popupAnni.style.display = 'none';
+  if (anniMsg) anniMsg.textContent = '';
+}
+
+if (btnChiudiAnni) btnChiudiAnni.addEventListener('click', chiudiPopupAnni);
+if (popupAnni) popupAnni.addEventListener('click', (e) => {
+  if (e.target === popupAnni) chiudiPopupAnni();
+});
+
+function aggiornaListaAnni() {
+  if (!listaAnni) return;
+  listaAnni.innerHTML = '';
+  anni.forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'anno-row';
+    row.innerHTML = `
+      <span>${a}</span>
+      <button title="Rimuovi anno" onclick="rimuoviAnnoDaUI('${a}')">✕</button>
+    `;
+    listaAnni.appendChild(row);
+  });
+}
+
+async function aggiungiAnnoDaUI() {
+  const anno = nuovoAnnoInput ? nuovoAnnoInput.value : '';
+  if (!anno || isNaN(parseInt(anno, 10))) {
+    if (anniMsg) anniMsg.textContent = 'Inserisci un anno valido.';
+    return;
+  }
+  if (anni.includes(anno)) {
+    if (anniMsg) anniMsg.textContent = 'Anno già presente.';
+    return;
+  }
+  if (btnAggiungiAnno) btnAggiungiAnno.disabled = true;
+  try {
+    await aggiungiAnno(anno);
+    anni.push(anno);
+    anni.sort();
+    aggiornaSelectAnni();
+    aggiornaListaAnni();
+    if (nuovoAnnoInput) nuovoAnnoInput.value = '';
+    if (anniMsg) anniMsg.textContent = '';
+    show('Anno ' + anno + ' aggiunto.', 'ok');
+    // Seleziona il nuovo anno e apri popup AP
+    selAnno.value = anno;
+    currentAnno = anno;
+    chiudiPopupAnni();
+    caricaGriglia();
+  } catch (e) {
+    if (anniMsg) anniMsg.textContent = 'Errore: ' + e.message;
+  } finally {
+    if (btnAggiungiAnno) btnAggiungiAnno.disabled = false;
+  }
+}
+
+async function rimuoviAnnoDaUI(anno) {
+  if (!confirm('Rimuovere l\'anno ' + anno + '?')) return;
+  try {
+    await rimuoviAnno(anno);
+    anni = anni.filter(a => a !== anno);
+    aggiornaSelectAnni();
+    aggiornaListaAnni();
+    show('Anno ' + anno + ' rimosso.', 'ok');
+    // Se l'anno rimosso era selezionato, seleziona il primo disponibile
+    if (currentAnno === anno && anni.length > 0) {
+      selAnno.value = anni[0];
+      currentAnno = anni[0];
+      caricaGriglia();
+    }
+  } catch (e) {
+    if (anniMsg) anniMsg.textContent = 'Errore: ' + e.message;
+  }
+}
+
 // Calcola residui per un anno, replicando le formule del foglio Google:
 //   C7 = SUM(B2:C2)+SUM(B3:C3)-C5-C6
 //   D7 = C7+SUM(D2:D3)-D5-D6   (ecc. per ogni mese)
 //   O9 = O2-O5   (ferie residue teoriche)
 //   O10 = O3-O6  (permessi residue teoriche)
 async function calcolaAnno(anno) {
-  const r = await fetch(`data/Mie Ferie - ${anno}.csv`);
-  if (!r.ok) throw new Error('CSV non trovato per ' + anno);
-  const rows = parseCSV(await r.text());
+  let ferieRow = [], permRow = [], godFRow = [], godPRow = [];
+  let csvTrovato = true;
 
-  const ferieRow = rows[1] || [];
-  const permRow = rows[2] || [];
-  const godFRow = rows[4] || [];
-  const godPRow = rows[5] || [];
+  try {
+    const r = await fetch(`data/Mie Ferie - ${anno}.csv`);
+    if (!r.ok) {
+      csvTrovato = false;
+    } else {
+      const rows = parseCSV(await r.text());
+      ferieRow = rows[1] || [];
+      permRow = rows[2] || [];
+      godFRow = rows[4] || [];
+      godPRow = rows[5] || [];
+    }
+  } catch (e) {
+    csvTrovato = false;
+  }
 
   // --- AP: leggi da CSV (colonna B, indice 1) se presente e non vuoto ---
   let apFerie = parseIT(ferieRow[1]);
@@ -201,7 +323,6 @@ async function calcolaAnno(anno) {
       const rPrev = await fetch(`data/Mie Ferie - ${annoPrev}.csv`);
       if (rPrev.ok) {
         const prevRows = parseCSV(await rPrev.text());
-        // Cerca le righe con le residue teoriche e prendi l'ultimo valore numerico
         for (let r = 0; r < prevRows.length; r++) {
           const row = prevRows[r];
           const joined = row.join(' ').toUpperCase();
@@ -258,11 +379,19 @@ async function calcolaAnno(anno) {
     });
   }
 
-  return { anno, apFerie, apPermessi, apBloccato, mesi, suggerimentoF, suggerimentoP };
+  return { anno, apFerie, apPermessi, apBloccato, mesi, suggerimentoF, suggerimentoP, csvTrovato };
 }
 
 function render(dati) {
   gridBody.innerHTML = '';
+
+  // Banner se CSV mancante
+  if (!dati.csvTrovato) {
+    const trInfo = document.createElement('tr');
+    trInfo.className = 'row-info';
+    trInfo.innerHTML = `<td colspan="5" class="info-msg">⚠ Nessun CSV trovato per ${dati.anno}. Maturazione non disponibile. Goduti e AP si possono comunque inserire.</td>`;
+    gridBody.appendChild(trInfo);
+  }
 
   // Barra AP: visibile se AP non bloccato, oppure se bloccato ma a zero (da impostare)
   const apEffettivamenteBloccato = dati.apBloccato && !(dati.apFerie === 0 && dati.apPermessi === 0);
@@ -376,15 +505,7 @@ function impostaMeseCorrente() {
   mese.value = MESI[new Date().getMonth()];
 }
 
-async function loadAnni() {
-  try {
-    const r = await fetch('data/anni.json');
-    if (!r.ok) throw new Error('lista anni non trovata');
-    anni = await r.json();
-  } catch (e) {
-    anni = ["2026","2027","2028","2029","2030"];
-  }
-
+function aggiornaSelectAnni() {
   selAnno.innerHTML = '';
   anni.forEach(a => {
     const opt = document.createElement('option');
@@ -392,10 +513,27 @@ async function loadAnni() {
     opt.innerText = a;
     selAnno.appendChild(opt);
   });
-
   const annoCorrente = new Date().getFullYear().toString();
   selAnno.value = anni.includes(annoCorrente) ? annoCorrente : anni[anni.length - 1];
   currentAnno = selAnno.value;
+}
+
+async function loadAnni() {
+  // Prova da Supabase
+  const anniSupabase = await caricaAnniDaSupabase();
+  if (anniSupabase && anniSupabase.length > 0) {
+    anni = anniSupabase;
+  } else {
+    // Fallback a anni.json
+    try {
+      const r = await fetch('data/anni.json');
+      if (r.ok) anni = await r.json();
+    } catch (e) {}
+    if (!anni || anni.length === 0) {
+      anni = ["2026","2027","2028","2029","2030"];
+    }
+  }
+  aggiornaSelectAnni();
   impostaMeseCorrente();
   caricaGriglia();
 }

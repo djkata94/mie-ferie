@@ -21,6 +21,7 @@
     <div class="select-anno-wrapper">
       <label>Anno</label>
       <select id="selAnno" onchange="caricaGriglia()"></select>
+      <button id="btnGestisciAnni" class="btn-icon" title="Gestisci anni" onclick="apriPopupAnni()">⚙</button>
     </div>
   </div>
 
@@ -85,6 +86,23 @@
       <button type="button" id="btnAnnullaAP">Annulla</button>
     </div>
     <p id="apMsg" style="color:#f87171; font-size:0.8rem; margin-top:8px;"></p>
+  </div>
+</div>
+
+<!-- Popup gestione anni -->
+<div id="popupAnni" class="popup">
+  <div class="popup-content">
+    <h3>Gestione Anni</h3>
+    <p>Aggiungi o rimuovi anni dal calendario.</p>
+    <div id="listaAnni" class="lista-anni"></div>
+    <div class="aggiungi-anno-row">
+      <input type="number" id="nuovoAnno" placeholder="2031" min="2000" max="2100">
+      <button id="btnAggiungiAnno" onclick="aggiungiAnnoDaUI()">Aggiungi</button>
+    </div>
+    <div class="popup-btns">
+      <button type="button" id="btnChiudiAnni">Chiudi</button>
+    </div>
+    <p id="anniMsg" style="color:#f87171; font-size:0.8rem; margin-top:8px;"></p>
   </div>
 </div>
 
