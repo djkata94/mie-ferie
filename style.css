@@ -293,3 +293,135 @@ button:disabled { background: #9a9584; cursor: not-allowed; opacity: 0.5; }
   padding: 10px;
   background: rgba(201,154,74,0.1);
 }
+
+/* ===== Report / riepilogo annuale ===== */
+.report-section {
+  background: #1b1c15;
+  border: 1px solid rgba(201,154,74,0.35);
+  border-radius: 10px;
+  padding: 20px;
+  margin-top: 22px;
+  box-shadow: 0 18px 40px -12px rgba(0,0,0,0.55);
+}
+.report-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
+  border-bottom: 1px solid rgba(238,231,216,0.10); padding-bottom: 12px;
+}
+.report-header h3 {
+  margin: 0; font-family: 'Fraunces', serif; font-size: 1.3rem; color: #c99a4a;
+}
+.report-sub {
+  margin: 20px 0 10px; font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: #9a9584;
+}
+.report-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;
+}
+.report-card {
+  background: #121309; border: 1px solid rgba(238,231,216,0.10);
+  border-radius: 8px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.report-card-warn { border-color: #f87171; background: rgba(248,113,113,0.08); }
+.report-card-label {
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem;
+  text-transform: uppercase; letter-spacing: 0.08em; color: #9a9584;
+}
+.report-card-val {
+  font-family: 'IBM Plex Mono', monospace; font-size: 1.5rem; font-weight: 700; color: #c99a4a;
+}
+.report-card-sub { font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: #9a9584; }
+.report-confronto { overflow-x: auto; }
+.report-table { width: 100%; border-collapse: collapse; min-width: 480px; }
+.report-table th {
+  background: #23251c; color: #9a9584; font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 10px 12px; border-bottom: 1px solid rgba(238,231,216,0.10); text-align: left;
+}
+.report-table td {
+  padding: 9px 12px; border-bottom: 1px solid rgba(238,231,216,0.08);
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem;
+}
+.report-row-sel { background: rgba(201,154,74,0.10); }
+.report-row-sel td { color: #c99a4a; font-weight: 700; }
+.report-res-warn { color: #f87171; font-weight: 700; }
+
+/* ===== Responsive mobile ===== */
+@media (max-width: 700px) {
+  body { padding: 16px 10px 40px; }
+  .header-container h2 { font-size: clamp(1.4rem, 6vw, 2rem); }
+  .header-container h2 i { margin-right: 8px; }
+  .select-anno-wrapper { width: 100%; flex-wrap: wrap; }
+  #selAnno { flex: 1; min-width: 120px; }
+
+  /* Tabella -> card stacking (una riga = una card) */
+  table, thead, tbody, tr, td { display: block; }
+  thead { display: none; }
+  table { min-width: 0; }
+  .table-container { overflow-x: visible; }
+  .table-container tbody tr {
+    background: #121309;
+    border: 1px solid rgba(238,231,216,0.10);
+    border-radius: 8px;
+    margin: 0 10px 12px;
+    padding: 6px 0;
+  }
+  .table-container td {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; border-bottom: 1px solid rgba(238,231,216,0.06);
+    padding: 9px 14px;
+  }
+  .table-container tbody tr td:last-child { border-bottom: none; }
+  .table-container td::before {
+    content: attr(data-label);
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
+    text-transform: uppercase; letter-spacing: 0.06em; color: #9a9584;
+    flex: 0 0 auto; font-weight: 400;
+  }
+  .table-container td:first-child { font-weight: 700; color: #c99a4a; }
+  .table-container td:first-child::before { content: none; }
+  .table-container .tot-val {
+    display: flex; width: auto; margin: 0; border: none; background: none;
+    justify-content: space-between; text-align: left;
+  }
+  .table-container .info-msg { display: block; text-align: center; }
+  .table-container .info-msg::before { content: none; }
+
+  .input-card { grid-template-columns: 1fr; }
+  .report-cards { grid-template-columns: 1fr; }
+  .report-header h3 { font-size: 1.15rem; }
+}
+
+/* Touch target maggiorati su dispositivi touch */
+@media (pointer: coarse) {
+  .btn-icon { min-width: 44px; min-height: 44px; }
+  .lista-anni .anno-row button { min-width: 44px; min-height: 44px; }
+  .popup-btns button { min-height: 44px; }
+}
+
+/* ===== Stampa / PDF ===== */
+@media print {
+  body {
+    background: #fff !important; background-image: none !important;
+    color: #000 !important; padding: 0 !important; display: block !important;
+  }
+  .ledger-tab, .header-container, .msg, #sogliaAlert, .ap-bar,
+  .table-container, .input-card, #status { display: none !important; }
+  .container { max-width: 100%; }
+  #reportSection {
+    display: block !important; position: static; border: none !important;
+    background: #fff !important; box-shadow: none !important;
+    padding: 0 !important; margin: 0 !important;
+  }
+  #reportSection * { color: #000 !important; }
+  .report-header { border-color: #999 !important; }
+  .report-header .popup-btns { display: none !important; }
+  .report-card { background: #fff !important; border: 1px solid #999 !important; }
+  .report-card-warn { background: #fff !important; }
+  .report-table { min-width: 0 !important; }
+  .report-table th { background: #eee !important; color: #000 !important; border: 1px solid #999 !important; }
+  .report-table td { border: 1px solid #999 !important; color: #000 !important; }
+  .report-row-sel { background: #f3f3f3 !important; }
+  .report-res-warn { color: #000 !important; text-decoration: underline; }
+}

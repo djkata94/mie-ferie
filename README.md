@@ -100,6 +100,7 @@ data/
   ...
 scripts/
   load_maturation.js  # importa la maturazione dai CSV a Supabase (nessuna dipendenza)
+  serve.js            # server statico minimo per test locali (node scripts/serve.js)
 ```
 
 ## Importare la maturazione dai CSV a Supabase
@@ -128,7 +129,19 @@ fallback/backward-compatibilità (e per i goduti storici).
 **Nuovi pulsanti nell'interfaccia:**
 - **📁 Importa maturazione** – apre un popup per caricare un singolo CSV (`Mie Ferie - YYYY.csv`) direttamente dal sito.
 - **💾 Esporta backup JSON** – scarica tutte le tabelle Supabase in un file JSON di backup locale.
+- **📊 Report** – mostra il riepilogo dell'anno (maturato, goduti, residuo) e il confronto tra tutti gli anni, con stampa/PDF.
 - **⚠️ Avviso soglia 20h** – banner rosso che appare quando il residuo totale (ferie + permessi) dell'ultimo mese scende sotto 20h.
+
+## Test locali
+
+I CSV vengono caricati con `fetch`, che su `file://` è bloccato dal browser. Per provare il sito in locale usa il server statico incluso:
+
+```bash
+cd mie-ferie
+node scripts/serve.js 8765   # poi apri http://localhost:8765
+```
+
+(Nessuna dipendenza esterna.)
 
 ---
 
@@ -160,12 +173,11 @@ Il vecchio script Google Apps Script non è più utilizzato dato che il sito è 
 - Policy RLS meno permissive (lettura pubblica, scrittura solo admin o via service role).
 - Valutare di proteggere l'anon key (richiederebbe un backend proxy).
 
-### 6. Report / riepilogo annuale
-Pagina o sezione con:
-- totale goduti vs totale maturato
-- residuo attuale
-- confronto tra anni (tabella o grafico)
-- esportazione in PDF/stampa
+### 6. Report / riepilogo annuale ✅ (fatto)
+Pulsante **📊** nel sito: apre una sezione "Report" con
+- card riepilogo dell'anno selezionato (maturato totale, goduti totale, residuo finale con AP)
+- tabella di **confronto tra tutti gli anni** (maturato, goduti, AP, residuo finale) con l'anno selezionato evidenziato e residui sotto 20h in rosso
+- pulsante **🖨 Stampa / PDF** che usa le stampe del browser (con CSS dedicato `@media print` che isola solo il report).
 
 ### 7. Notifiche / soglie residuo ✅ (fatto)
 Banner persistente rosso (`#sogliaAlert`) quando il residuo totale (ferie + permessi)
@@ -174,8 +186,8 @@ dell'ultimo mese scende sotto **20h totali**.
 ### 8. Storico modifiche goduti
 Tabella `storico_goduti` che registra ogni modifica (data, mese, valore precedente, nuovo valore) per risolvere discrepanze.
 
-### 9. Responsive mobile
-Migliorare il layout su smartphone: la tabella con `min-width: 650px` diventa scadente. Valutare card stacking o colonne ridotte sotto i 700px.
+### 9. Responsive mobile ✅ (fatto)
+Layout mobile-first sotto i 700px: la tabella diventa **card stacking** (una riga = una card con etichette `data-label`), titolo fluido con `clamp()`, colonna di input a riga singola, touch target 44px sui dispositivi touch.
 
 ### 10. Export backup dati Supabase ✅ (fatto)
 Pulsante **💾** accanto al selettore anni: esporta tutte le tabelle Supabase

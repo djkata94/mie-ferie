@@ -2,6 +2,7 @@
 <html>
 <head>
   <base target="_top">
+  <meta charset="utf-8">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -24,6 +25,7 @@
       <button id="btnGestisciAnni" class="btn-icon" title="Gestisci anni" onclick="apriPopupAnni()">⚙</button>
       <button id="btnImportaMaturation" class="btn-icon" title="Importa maturazione da CSV" onclick="apriPopupMaturation()">📁</button>
       <button id="btnExportBackup" class="btn-icon" title="Esporta backup JSON">💾</button>
+      <button id="btnReport" class="btn-icon" title="Report annuale">📊</button>
     </div>
   </div>
 
@@ -77,6 +79,20 @@
     <button id="btnSalva" onclick="inviaDati()">Salva</button>
   </div>
   <p id="status" style="font-size:0.85rem; color:var(--brass); text-align:center; min-height: 20px; margin-top:15px; font-family:'IBM Plex Mono', monospace;"></p>
+
+  <!-- Report / riepilogo annuale -->
+  <div id="reportSection" class="report-section" style="display:none;">
+    <div class="report-header">
+      <h3>Report <span id="reportAnno"></span></h3>
+      <div class="popup-btns">
+        <button id="btnStampaReport">🖨 Stampa / PDF</button>
+        <button type="button" id="btnChiudiReport">Chiudi</button>
+      </div>
+    </div>
+    <div id="reportRiepilogo" class="report-riepilogo"></div>
+    <h4 class="report-sub">Confronto tra anni</h4>
+    <div id="reportConfronto" class="report-confronto"></div>
+  </div>
 </div>
 
 <!-- Popup per impostare AP (Anno Precedente) -->

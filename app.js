@@ -10,6 +10,7 @@ let anni = [];
 let currentAnno = null;
 let apBloccato = false;
 let apValori = { ferie: 0, permessi: 0 };
+let ultimiDati = null;
 
 const selAnno = document.getElementById('selAnno');
 const apBar = document.getElementById('apBar');
@@ -245,6 +246,104 @@ async function esportaBackup() {
   } catch (e) {
     show('Errore export backup: ' + e.message, 'err');
   }
+}
+
+// --- Report / riepilogo annuale ---
+function sommaMesi(dati) {
+  let matF = 0, matP = 0, godF = 0, godP = 0;
+  dati.mesi.forEach(m => { matF += m.matF; matP += m.matP; godF += m.godF; godP += m.godP; });
+  const residuoFinale = dati.mesi.length ? dati.mesi[dati.mesi.length - 1].totale : 0;
+  const apTot = (parseFloat(dati.apFerie) || 0) + (parseFloat(dati.apPermessi) || 0);
+  return { matF, matP, godF, godP, residuoFinale, apTot };
+}
+
+async function apriReport() {
+  const reportSection = document.getElementById('reportSection');
+  if (!reportSection) return;
+  reportSection.style.display = 'block';
+  if (document.getElementById('reportAnno')) document.getElementById('reportAnno').textContent = currentAnno;
+  await caricaReport();
+}
+
+function chiudiReport() {
+  const reportSection = document.getElementById('reportSection');
+  if (reportSection) reportSection.style.display = 'none';
+}
+
+function stampaReport() {
+  window.print();
+}
+
+async function caricaReport() {
+  const riepilogo = document.getElementById('reportRiepilogo');
+  const confronto = document.getElementById('reportConfronto');
+  if (!riepilogo || !confronto) return;
+
+  show('Genero report...', 'info');
+
+  // Riepilogo dell'anno selezionato (usa i dati già caricati in griglia)
+  const annoSel = currentAnno;
+  const datiSel = ultimiDati && String(ultimiDati.anno) === String(annoSel)
+    ? ultimiDati
+    : await calcolaAnno(annoSel);
+  const tSel = sommaMesi(datiSel);
+
+  riepilogo.innerHTML = `
+    <div class="report-cards">
+      <div class="report-card">
+        <span class="report-card-label">Maturato totale</span>
+        <span class="report-card-val">${fmtIT(tSel.matF + tSel.matP)}h</span>
+        <span class="report-card-sub">F ${fmtIT(tSel.matF)}h · P ${fmtIT(tSel.matP)}h</span>
+      </div>
+      <div class="report-card">
+        <span class="report-card-label">Goduti totale</span>
+        <span class="report-card-val">${fmtIT(tSel.godF + tSel.godP)}h</span>
+        <span class="report-card-sub">F ${fmtIT(tSel.godF)}h · P ${fmtIT(tSel.godP)}h</span>
+      </div>
+      <div class="report-card ${tSel.residuoFinale < 20 ? 'report-card-warn' : ''}">
+        <span class="report-card-label">Residuo finale</span>
+        <span class="report-card-val">${fmtIT(tSel.residuoFinale)}h</span>
+        <span class="report-card-sub">AP ${fmtIT(tSel.apTot)}h</span>
+      </div>
+    </div>
+  `;
+
+  // Confronto tra tutti gli anni
+  const righe = [];
+  for (const a of anni) {
+    let dati;
+    if (String(a) === String(annoSel)) {
+      dati = datiSel;
+    } else {
+      try { dati = await calcolaAnno(a); } catch (e) { dati = null; }
+    }
+    if (!dati) continue;
+    const t = sommaMesi(dati);
+    righe.push({ anno: a, t, selezionato: String(a) === String(annoSel) });
+  }
+
+  confronto.innerHTML = `
+    <table class="report-table">
+      <thead>
+        <tr>
+          <th>Anno</th><th>Maturato</th><th>Goduti</th><th>AP</th><th>Residuo</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${righe.map(r => `
+          <tr class="${r.selezionato ? 'report-row-sel' : ''}">
+            <td data-label="Anno">${r.anno}</td>
+            <td data-label="Maturato">${fmtIT(r.t.matF + r.t.matP)}h</td>
+            <td data-label="Goduti">${fmtIT(r.t.godF + r.t.godP)}h</td>
+            <td data-label="AP">${fmtIT(r.t.apTot)}h</td>
+            <td data-label="Residuo" class="${r.t.residuoFinale < 20 ? 'report-res-warn' : ''}">${fmtIT(r.t.residuoFinale)}h</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  show('', 'info');
 }
 
 // Gestione anni da Supabase
@@ -551,11 +650,11 @@ function render(dati) {
     const trAP = document.createElement('tr');
     trAP.className = 'row-ap';
     trAP.innerHTML = `
-      <td>AP (Anno Prec.)</td>
-      <td class="god-val">- / -</td>
-      <td class="res-val">${fmtIT(dati.apFerie)}h</td>
-      <td class="res-val">${fmtIT(dati.apPermessi)}h</td>
-      <td class="tot-val">${fmtIT(dati.apFerie + dati.apPermessi)}h</td>
+      <td data-label="AP">AP (Anno Prec.)</td>
+      <td class="god-val" data-label="Godute">- / -</td>
+      <td class="res-val" data-label="Resid. Ferie">${fmtIT(dati.apFerie)}h</td>
+      <td class="res-val" data-label="Resid. Permessi">${fmtIT(dati.apPermessi)}h</td>
+      <td class="tot-val" data-label="Totale">${fmtIT(dati.apFerie + dati.apPermessi)}h</td>
     `;
     gridBody.appendChild(trAP);
   } else {
@@ -567,11 +666,11 @@ function render(dati) {
     const trAP = document.createElement('tr');
     trAP.className = 'row-ap';
     trAP.innerHTML = `
-      <td>AP (Anno Prec.)</td>
-      <td class="god-val">- / -</td>
-      <td class="res-val">-</td>
-      <td class="res-val">-</td>
-      <td class="tot-val">-</td>
+      <td data-label="AP">AP (Anno Prec.)</td>
+      <td class="god-val" data-label="Godute">- / -</td>
+      <td class="res-val" data-label="Resid. Ferie">-</td>
+      <td class="res-val" data-label="Resid. Permessi">-</td>
+      <td class="tot-val" data-label="Totale">-</td>
     `;
     gridBody.appendChild(trAP);
   }
@@ -579,11 +678,11 @@ function render(dati) {
   dati.mesi.forEach(m => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${m.nome}</td>
-      <td class="god-val">${fmtIT(m.godF)} / ${fmtIT(m.godP)}</td>
-      <td class="res-val">${fmtIT(m.resF)}h</td>
-      <td class="res-val">${fmtIT(m.resP)}h</td>
-      <td class="tot-val">${fmtIT(m.totale)}h</td>
+      <td data-label="Mese">${m.nome}</td>
+      <td class="god-val" data-label="Godute (F/P)">${fmtIT(m.godF)} / ${fmtIT(m.godP)}</td>
+      <td class="res-val" data-label="Resid. Ferie">${fmtIT(m.resF)}h</td>
+      <td class="res-val" data-label="Resid. Permessi">${fmtIT(m.resP)}h</td>
+      <td class="tot-val" data-label="Totale">${fmtIT(m.totale)}h</td>
     `;
     gridBody.appendChild(tr);
   });
@@ -615,6 +714,7 @@ async function caricaGriglia() {
 
   try {
     const dati = await calcolaAnno(anno);
+    ultimiDati = dati;
     render(dati);
 
     // Se l'AP non è ancora configurato, apri il popup dopo breve ritardo
@@ -681,6 +781,9 @@ function aggiornaSelectAnni() {
 }
 
 document.getElementById('btnExportBackup')?.addEventListener('click', esportaBackup);
+document.getElementById('btnReport')?.addEventListener('click', apriReport);
+document.getElementById('btnChiudiReport')?.addEventListener('click', chiudiReport);
+document.getElementById('btnStampaReport')?.addEventListener('click', stampaReport);
 
 async function loadAnni() {
   // Prova da Supabase (tabella anni)
