@@ -125,6 +125,11 @@ fallback/backward-compatibilità (e per i goduti storici).
 2. Imposta l'AP dal popup (verrà suggerito automaticamente il residuo dicembre dell'anno precedente, se disponibile).
 3. Per la maturazione: esporta il foglio anno dal Google Sheet in CSV, salvalo come `data/Mie Ferie - <ANNO>.csv` ed esegui `node scripts/load_maturation.js` (oppure usa il popup **📁** nel sito per caricare il singolo CSV dall'interfaccia).
 
+**Nuovi pulsanti nell'interfaccia:**
+- **📁 Importa maturazione** – apre un popup per caricare un singolo CSV (`Mie Ferie - YYYY.csv`) direttamente dal sito.
+- **💾 Esporta backup JSON** – scarica tutte le tabelle Supabase in un file JSON di backup locale.
+- **⚠️ Avviso soglia 20h** – banner rosso che appare quando il residuo totale (ferie + permessi) dell'ultimo mese scende sotto 20h.
+
 ---
 
 ## Roadmap — idee di miglioramento
@@ -142,8 +147,11 @@ valutare un eventuale pannello admin per modificare la maturazione direttamente 
 La lista anni viene dalla tabella `anni`, gestibile dal sito con il pulsante ⚙
 (popup "Gestisci anni" con Aggiungi/Rimuovi). `anni.json` resta solo come fallback.
 
-### 3. Sistema di blocco AP più pulito
-Aggiungere un campo esplicito `ap_configurato` (boolean) separato dai valori, per eliminare l'attuale workaround "se bloccato ma zero, tratto come non bloccato".
+### 3. Sistema di blocco AP più pulito ✅ (fatto)
+La tabella `anno_ap` ha il campo `ap_configurato` (boolean). Il sito tratta l'AP come
+bloccato solo quando `bloccato = true` **e** `ap_configurato = true`. Gli anni con AP
+già salvato ma senza flag devono essere riconfermati dal popup "Imposta AP".
+Eliminato il workaround "se bloccato ma a zero, tratto come non bloccato".
 
 ### 4. Rimuovere `codice.gs` e aggiungere README ✅ (fatto)
 Il vecchio script Google Apps Script non è più utilizzato dato che il sito è standalone con Supabase + CSV. Rimosso. Questo README documenta setup e logica.
@@ -159,8 +167,9 @@ Pagina o sezione con:
 - confronto tra anni (tabella o grafico)
 - esportazione in PDF/stampa
 
-### 7. Notifiche / soglie residuo
-Banner o badge quando il residuo scende sotto una soglia configurabile (es. 40h), oppure promemoria per usare i giorni prima di eventuali scadenze.
+### 7. Notifiche / soglie residuo ✅ (fatto)
+Banner persistente rosso (`#sogliaAlert`) quando il residuo totale (ferie + permessi)
+dell'ultimo mese scende sotto **20h totali**.
 
 ### 8. Storico modifiche goduti
 Tabella `storico_goduti` che registra ogni modifica (data, mese, valore precedente, nuovo valore) per risolvere discrepanze.
@@ -168,5 +177,7 @@ Tabella `storico_goduti` che registra ogni modifica (data, mese, valore preceden
 ### 9. Responsive mobile
 Migliorare il layout su smartphone: la tabella con `min-width: 650px` diventa scadente. Valutare card stacking o colonne ridotte sotto i 700px.
 
-### 10. Export backup dati Supabase
-Pulsante per esportare tutti i dati (`ferie_mensili` + `anno_ap`) in JSON, così da avere un backup locale indipendente da Supabase.
+### 10. Export backup dati Supabase ✅ (fatto)
+Pulsante **💾** accanto al selettore anni: esporta tutte le tabelle Supabase
+(`anni`, `ferie_mensili`, `anno_ap`, `maturazione_mensile`) in un file JSON
+con data nel nome (`mie-ferie-backup-YYYY-MM-DD.json`).

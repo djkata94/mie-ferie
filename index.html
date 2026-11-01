@@ -23,10 +23,14 @@
       <select id="selAnno" onchange="caricaGriglia()"></select>
       <button id="btnGestisciAnni" class="btn-icon" title="Gestisci anni" onclick="apriPopupAnni()">⚙</button>
       <button id="btnImportaMaturation" class="btn-icon" title="Importa maturazione da CSV" onclick="apriPopupMaturation()">📁</button>
+      <button id="btnExportBackup" class="btn-icon" title="Esporta backup JSON">💾</button>
     </div>
   </div>
 
   <div id="msg" class="msg"></div>
+
+  <!-- Avviso soglia residuo totale sotto 20h -->
+  <div id="sogliaAlert" class="msg err" style="display:none;"></div>
 
   <!-- Barra AP: visibile quando l'AP dell'anno non è ancora bloccato -->
   <div id="apBar" class="ap-bar">

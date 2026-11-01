@@ -158,14 +158,14 @@ async function caricaAP(anno) {
   try {
     const { data, error } = await sb
       .from(ANNO_AP_TABLE)
-      .select('ap_ferie, ap_permessi, bloccato')
+      .select('ap_ferie, ap_permessi, bloccato, ap_configurato')
       .eq('anno', parseInt(anno, 10))
       .maybeSingle();
     if (error) {
       console.error('Errore caricaAP:', error);
       return { ap_ferie: 0, ap_permessi: 0, bloccato: false };
     }
-    return data || { ap_ferie: 0, ap_permessi: 0, bloccato: false };
+    return data || { ap_ferie: 0, ap_permessi: 0, bloccato: false, ap_configurato: false };
   } catch (e) {
     console.error('Eccezione caricaAP:', e);
     return { ap_ferie: 0, ap_permessi: 0, bloccato: false };
@@ -198,6 +198,7 @@ async function salvaAP(anno, ferie, permessi) {
       ap_ferie: parseFloat(ferie) || 0,
       ap_permessi: parseFloat(permessi) || 0,
       bloccato: true,
+      ap_configurato: true,
       updated_at: new Date().toISOString()
     }, { onConflict: 'anno' });
   if (error) throw error;
@@ -214,6 +215,36 @@ async function salvaMaturazione(anno, mese, ferie, permessi) {
       updated_at: new Date().toISOString()
     }, { onConflict: ['anno', 'mese'] });
   if (error) throw error;
+}
+
+// Esportazione backup dati Supabase (tutte le tabelle)
+async function esportaBackup() {
+  const tabelle = ['anni', 'ferie_mensili', 'anno_ap', 'maturazione_mensile'];
+  const backup = {};
+  try {
+    for (const t of tabelle) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=*`, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
+      if (!res.ok) throw new Error(`Errore lettura ${t}: ${res.status}`);
+      backup[t] = await res.json();
+    }
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mie-ferie-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    show('Backup esportato.', 'ok');
+  } catch (e) {
+    show('Errore export backup: ' + e.message, 'err');
+  }
 }
 
 // Gestione anni da Supabase
@@ -410,22 +441,26 @@ async function calcolaAnno(anno) {
   let apFerie = parseIT(ferieMaturazione[1]);
   let apPermessi = parseIT(permMaturazione[1]);
   const apCSVVuoto = apFStr === '' && apPStr === '';
+  let apConfigurato = false;
 
   let apDaSupabase = null;
   if (apCSVVuoto) {
     apDaSupabase = await caricaAP(anno);
-    if (apDaSupabase && apDaSupabase.bloccato === true) {
+    if (apDaSupabase && apDaSupabase.bloccato === true && apDaSupabase.ap_configurato === true) {
       apFerie = parseFloat(apDaSupabase.ap_ferie) || 0;
       apPermessi = parseFloat(apDaSupabase.ap_permessi) || 0;
       apBloccato = true;
+      apConfigurato = true;
       apValori = { ferie: apFerie, permessi: apPermessi };
     } else {
       apBloccato = false;
+      apConfigurato = false;
       apValori = { ferie: 0, permessi: 0 };
     }
   } else {
-    // AP presente nel CSV: consideriamolo già definito (bloccato)
+    // AP presente nel CSV: consideriamolo già definito (bloccato e configurato)
     apBloccato = true;
+    apConfigurato = true;
     apValori = { ferie: apFerie, permessi: apPermessi };
   }
 
@@ -494,7 +529,7 @@ async function calcolaAnno(anno) {
     });
   }
 
-  return { anno, apFerie, apPermessi, apBloccato, mesi, suggerimentoF, suggerimentoP, maturazioneCaricata, csvTrovato };
+  return { anno, apFerie, apPermessi, apBloccato, apConfigurato, mesi, suggerimentoF, suggerimentoP, maturazioneCaricata, csvTrovato };
 }
 
 function render(dati) {
@@ -508,8 +543,8 @@ function render(dati) {
     gridBody.appendChild(trInfo);
   }
 
-  // Barra AP: visibile se AP non bloccato, oppure se bloccato ma a zero (da impostare)
-  const apEffettivamenteBloccato = dati.apBloccato && !(dati.apFerie === 0 && dati.apPermessi === 0);
+  // Barra AP: visibile finché l'AP non è stato configurato (flag ap_configurato)
+  const apEffettivamenteBloccato = dati.apBloccato && dati.apConfigurato;
 
   if (apEffettivamenteBloccato) {
     if (apBar) apBar.style.display = 'none';
@@ -553,6 +588,18 @@ function render(dati) {
     gridBody.appendChild(tr);
   });
 
+  // Avviso soglia residuo totale (ferie + permessi) sotto 20h
+  const sogliaContainer = document.getElementById('sogliaAlert');
+  const ultimo = dati.mesi[dati.mesi.length - 1];
+  if (ultimo && ultimo.totale < 20) {
+    if (sogliaContainer) {
+      sogliaContainer.innerHTML = `⚠ Attenzione: residuo totale di ${fmtIT(ultimo.totale)}h (inferiore a 20h).`;
+      sogliaContainer.style.display = 'block';
+    }
+  } else if (sogliaContainer) {
+    sogliaContainer.style.display = 'none';
+  }
+
   mese.value = MESI[new Date().getMonth()];
   ferie.value = '';
   permessi.value = '';
@@ -570,8 +617,8 @@ async function caricaGriglia() {
     const dati = await calcolaAnno(anno);
     render(dati);
 
-    // Se AP non bloccato e valore zero, apri popup dopo breve ritardo
-    if (!dati.apBloccato && dati.apFerie === 0 && dati.apPermessi === 0) {
+    // Se l'AP non è ancora configurato, apri il popup dopo breve ritardo
+    if (!dati.apBloccato) {
       setTimeout(() => {
         apriPopupAP(anno, dati.suggerimentoF, dati.suggerimentoP);
       }, 400);
@@ -632,6 +679,8 @@ function aggiornaSelectAnni() {
   selAnno.value = anni.includes(annoCorrente) ? annoCorrente : anni[anni.length - 1];
   currentAnno = selAnno.value;
 }
+
+document.getElementById('btnExportBackup')?.addEventListener('click', esportaBackup);
 
 async function loadAnni() {
   // Prova da Supabase (tabella anni)
