@@ -109,3 +109,47 @@ test('parseCSV: virgole decimali tra virgolette e celle vuote', () => {
   assert.equal(L.parseIT(righe[1][1]), 0);
   assert.equal(L.parseIT('-'), 0);
 });
+
+// --- Goduti per giorno ---
+
+test('meseDaData e limitiMese: date valide, anni bisestili, date impossibili', () => {
+  assert.deepEqual(L.meseDaData('2026-03-15'), { anno: 2026, i: 2 });
+  assert.equal(L.meseDaData('2026-02-29'), null);
+  assert.deepEqual(L.meseDaData('2028-02-29'), { anno: 2028, i: 1 });
+  assert.equal(L.meseDaData('2026-13-01'), null);
+  assert.equal(L.meseDaData(''), null);
+  assert.deepEqual(L.limitiMese(2026, 1), { min: '2026-02-01', max: '2026-02-28' });
+  assert.deepEqual(L.limitiMese(2026, 11), { min: '2026-12-01', max: '2026-12-31' });
+});
+
+test('giornateDelMese: filtra per anno e mese e ordina per data', () => {
+  const g = [
+    { id: 3, data: '2026-03-20' }, { id: 1, data: '2026-03-02' },
+    { id: 2, data: '2026-04-01' }, { id: 4, data: '2027-03-05' }
+  ];
+  assert.deepEqual(L.giornateDelMese(g, 2026, 2).map(x => x.id), [1, 3]);
+  assert.deepEqual(L.giornateDelMese(g, '2027', 2).map(x => x.id), [4]);
+});
+
+test('pianificaGiornata: mese con totale e senza giornate → voce di riporto col totale', () => {
+  const piano = L.pianificaGiornata(
+    { data: '2026-03-16', ferie: '', permessi: '2', nota: ' dentista ' },
+    { anno: 2026, i: 2, godF: 0, godP: 7.5, numeroGiornate: 0 }
+  );
+  assert.deepEqual(piano.riga, { data: '2026-03-16', ferie_ore: 0, permessi_ore: 2, nota: 'dentista', riporto: false });
+  assert.deepEqual(piano.riporto, { data: '2026-03-01', ferie_ore: 0, permessi_ore: 7.5, nota: L.NOTA_RIPORTO, riporto: true });
+});
+
+test('pianificaGiornata: niente riporto se il mese è vuoto o ha già giornate', () => {
+  assert.equal(L.pianificaGiornata({ data: '2026-11-03', ferie: '8' }, { anno: 2026, i: 10, godF: 0, godP: 0, numeroGiornate: 0 }).riporto, null);
+  assert.equal(L.pianificaGiornata({ data: '2026-03-03', ferie: '8' }, { anno: 2026, i: 2, godF: 8, godP: 7.5, numeroGiornate: 2 }).riporto, null);
+});
+
+test('pianificaGiornata: validazioni', () => {
+  const mese = { anno: 2026, i: 2, godF: 0, godP: 0, numeroGiornate: 0 };
+  assert.throws(() => L.pianificaGiornata({ data: '2026-04-01', ferie: '8' }, mese), /Marzo 2026/);
+  assert.throws(() => L.pianificaGiornata({ data: '2026-03-01', ferie: '', permessi: '0' }, mese), L.ErroreValidazione);
+  assert.throws(() => L.pianificaGiornata({ data: '2026-03-01', ferie: '25' }, mese), /24 ore/);
+  assert.throws(() => L.pianificaGiornata({ data: '2026-03-01', ferie: '8', nota: 'x'.repeat(201) }, mese), /troppo lunga/);
+  assert.throws(() => L.pianificaGiornata({ data: 'boh', ferie: '8' }, mese), /Data non valida/);
+});

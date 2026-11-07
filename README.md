@@ -95,11 +95,13 @@ style.css           # stile scuro "ledger"
 logica.js           # calcoli puri (residui, suggerimento AP, validazione, errori): sito + test + script
 app.js              # login, Supabase, interfaccia; errori gestiti in segnalaErrore()
 supabase-config.js  # URL e anon key Supabase
-favicon.svg, manifest.webmanifest  # icona e installazione come app
+favicon.svg, manifest.webmanifest  # icona vettoriale e installazione come app
+icons/              # favicon.ico, PNG per iPhone (180) e Android (192, 512, maskable): node scripts/genera_icone.js
 package.json        # solo gli script npm test / npm run serve (nessuna dipendenza)
 supabase/
   rls.sql           # policy RLS "solo proprietario"
   storico.sql       # tabella storico_goduti + trigger su ferie_mensili
+  giornate.sql      # tabella goduti_giornalieri + trigger che ricalcola il totale del mese
 tests/
   logica.test.js    # test dei calcoli con i valori del foglio 2026
 data/
@@ -109,6 +111,7 @@ scripts/
   load_maturation.js  # importa la maturazione dai CSV a Supabase
   import_goduti.js    # importa goduti e AP di un anno da CSV a Supabase
   serve.js            # server statico minimo per test locali (node scripts/serve.js)
+  genera_icone.js     # rigenera le icone PNG/ICO dal disegno del calendario (zero dipendenze)
 ```
 
 ## Importare i CSV in Supabase
@@ -134,6 +137,18 @@ entrambe le celle vuote e non tocca l'AP se la colonna B del CSV è vuota.
 - Se il salvataggio cambia un valore già registrato (diverso da 0) il sito chiede conferma mostrando il prima → dopo.
 - Valori ammessi: da 0 a 200 ore al mese.
 
+### Dettaglio giornaliero
+
+Sotto il form c'è il pannello **Giornate** del mese selezionato: data, ore di ferie e/o permessi
+(massimo 24 al giorno) e una nota. Il totale del mese lo ricalcola un trigger su Supabase come somma
+delle giornate (`supabase/giornate.sql`), quindi griglia, report e storico restano coerenti.
+
+- Se il mese aveva già un totale registrato senza dettaglio, alla prima giornata il sito chiede di
+  tenerlo come voce di **riporto** (datata il 1° del mese), così non si perde nulla.
+- Un mese con il dettaglio giornaliero non si modifica più dal form del totale: si aggiungono o
+  eliminano giornate.
+- Finché `giornate.sql` non è stato lanciato il pannello lo segnala e il resto funziona come prima.
+
 ## Aggiungere un nuovo anno
 
 1. Tasto **⚙** nel sito (accanto al selettore anni) → **Aggiungi** l'anno. Viene salvato su Supabase e selezionato.
@@ -146,6 +161,15 @@ entrambe le celle vuote e non tocca l'AP se la colonna B del CSV è vuota.
 - **📊 Report** – mostra il riepilogo dell'anno (maturato, goduti, residuo) e il confronto tra tutti gli anni, con stampa/PDF.
 - **🕘 Storico** – elenco delle modifiche ai goduti dell'anno (quando, mese, prima → dopo). Serve `supabase/storico.sql`.
 - **⚠️ Avviso soglia 20h** – banner rosso che appare quando il residuo totale (ferie + permessi) dell'ultimo mese scende sotto 20h.
+
+## Icone e installazione
+
+- **Preferiti e schede**: `icons/favicon.ico` (16/32/48 px) più `favicon.svg` per i browser moderni.
+- **iPhone/iPad** (Condividi → Aggiungi alla schermata Home): `icons/apple-touch-icon.png`.
+- **Android** (Chrome → Installa app / Aggiungi a schermata Home): icone 192 e 512 del manifest,
+  più la versione *maskable* per le icone adattive.
+
+Si rigenerano tutte con `node scripts/genera_icone.js`.
 
 ## Test
 

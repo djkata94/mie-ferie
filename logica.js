@@ -137,6 +137,62 @@ function pianificaSalvataggio(attuale, nuovaF, nuovaP) {
   return { f, p, cambi, sovrascritti: cambi.filter(c => c.da !== 0) };
 }
 
+// --- Goduti per giorno (tabella goduti_giornalieri) ---
+const MAX_ORE_GIORNO = 24;
+const MAX_NOTA = 200;
+const NOTA_RIPORTO = 'Totale registrato prima del dettaglio giornaliero';
+
+// "2026-03-15" → { anno: 2026, i: 2 } (i = indice del mese 0..11)
+function meseDaData(dataISO) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dataISO || ''));
+  if (!m) return null;
+  const i = parseInt(m[2], 10) - 1;
+  const giorno = parseInt(m[3], 10);
+  const giorniNelMese = new Date(Date.UTC(parseInt(m[1], 10), i + 1, 0)).getUTCDate();
+  if (i < 0 || i > 11 || giorno < 1 || giorno > giorniNelMese) return null;
+  return { anno: parseInt(m[1], 10), i };
+}
+
+// Primo e ultimo giorno del mese, in formato ISO (per i limiti del campo data)
+function limitiMese(anno, i) {
+  const mm = String(i + 1).padStart(2, '0');
+  const ultimo = new Date(Date.UTC(anno, i + 1, 0)).getUTCDate();
+  return { min: `${anno}-${mm}-01`, max: `${anno}-${mm}-${String(ultimo).padStart(2, '0')}` };
+}
+
+function giornateDelMese(giornate, anno, i) {
+  return (giornate || [])
+    .filter(g => { const m = meseDaData(g.data); return m && m.anno === parseInt(anno, 10) && m.i === i; })
+    .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : (a.id || 0) - (b.id || 0)));
+}
+
+// Valida una nuova giornata e dice se prima serve la voce di riporto.
+// input: { data, ferie, permessi, nota } (ferie/permessi come testo del form)
+// mese: { anno, i, godF, godP, numeroGiornate } = stato attuale del mese selezionato
+function pianificaGiornata(input, mese) {
+  const pos = meseDaData(input.data);
+  if (!pos) throw new ErroreValidazione('Data non valida.');
+  if (pos.anno !== parseInt(mese.anno, 10) || pos.i !== mese.i) {
+    throw new ErroreValidazione(`La data deve essere in ${MESI_LABEL[mese.i]} ${mese.anno}.`);
+  }
+  const f = parseOre(input.ferie, 'Ferie') || 0;
+  const p = parseOre(input.permessi, 'Permessi') || 0;
+  if (f === 0 && p === 0) throw new ErroreValidazione('Inserisci le ore di ferie o di permessi della giornata.');
+  if (f > MAX_ORE_GIORNO || p > MAX_ORE_GIORNO) throw new ErroreValidazione(`In un giorno al massimo ${MAX_ORE_GIORNO} ore.`);
+  const nota = String(input.nota || '').trim();
+  if (nota.length > MAX_NOTA) throw new ErroreValidazione(`Nota troppo lunga (massimo ${MAX_NOTA} caratteri).`);
+
+  // Il mese ha già un totale ma nessuna giornata: quel totale diventa una voce di riporto,
+  // altrimenti il ricalcolo (somma delle giornate) lo cancellerebbe.
+  const serveRiporto = mese.numeroGiornate === 0 && (mese.godF > 0 || mese.godP > 0);
+  return {
+    riga: { data: input.data, ferie_ore: f, permessi_ore: p, nota: nota || null, riporto: false },
+    riporto: serveRiporto
+      ? { data: limitiMese(pos.anno, pos.i).min, ferie_ore: mese.godF, permessi_ore: mese.godP, nota: NOTA_RIPORTO, riporto: true }
+      : null
+  };
+}
+
 // Classifica un errore (di Supabase, di rete o di validazione) per decidere cosa dire all'utente.
 // tipi: validazione | rete | sessione | permesso | tabella-mancante | altro
 function classificaErrore(e) {
@@ -168,6 +224,7 @@ if (typeof module !== 'undefined' && module.exports) {
     MESI, MESI_LABEL, MAX_ORE_MESE,
     arrotonda2, parseIT, fmtIT, parseCSV,
     calcolaResidui, costruisciAnno, suggerimentoAP, sommaMesi,
-    ErroreValidazione, parseOre, pianificaSalvataggio, classificaErrore
+    ErroreValidazione, parseOre, pianificaSalvataggio, classificaErrore,
+    MAX_ORE_GIORNO, NOTA_RIPORTO, meseDaData, limitiMese, giornateDelMese, pianificaGiornata
   };
 }

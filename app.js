@@ -7,6 +7,7 @@ const ANNI_TABLE = 'anni';
 const MATURAZIONE_TABLE = 'maturazione_mensile';
 const GODUTI_TABLE = 'ferie_mensili';
 const STORICO_TABLE = 'storico_goduti';
+const GIORNATE_TABLE = 'goduti_giornalieri';
 const TIMEOUT_RETE_MS = 15000;
 
 // fetch con timeout: una richiesta bloccata diventa un errore "rete" invece di un'attesa infinita
@@ -123,13 +124,27 @@ async function caricaTuttiIDati() {
   });
 }
 
-// Dati per la griglia: l'anno richiesto più il suggerimento AP dal dicembre precedente
+// Giornate dell'anno; null se la tabella non esiste ancora (giornate.sql non lanciato)
+async function caricaGiornate(anno) {
+  try {
+    return await query('Lettura giornate', sb.from(GIORNATE_TABLE)
+      .select('id, data, ferie_ore, permessi_ore, nota, riporto')
+      .gte('data', `${anno}-01-01`)
+      .lte('data', `${anno}-12-31`)
+      .order('data', { ascending: true }));
+  } catch (e) {
+    if (classificaErrore(e).tipo === 'tabella-mancante') return null;
+    throw e;
+  }
+}
+
+// Dati per la griglia: l'anno richiesto, il suggerimento AP dal dicembre precedente e le giornate
 async function calcolaAnno(anno) {
-  const datiDi = await caricaTuttiIDati();
+  const [datiDi, giornate] = await Promise.all([caricaTuttiIDati(), caricaGiornate(anno)]);
   const dati = datiDi(anno);
   const annoPrev = String(parseInt(anno, 10) - 1);
   const sugg = !dati.apConfigurato && anni.includes(annoPrev) ? suggerimentoAP(datiDi(annoPrev)) : { ferie: 0, permessi: 0 };
-  return { ...dati, suggerimentoF: sugg.ferie, suggerimentoP: sugg.permessi };
+  return { ...dati, suggerimentoF: sugg.ferie, suggerimentoP: sugg.permessi, giornate };
 }
 
 async function caricaAnniDaSupabase() {
@@ -204,14 +219,161 @@ function render(dati) {
   precompilaMese();
 }
 
-// Mostra nel form i goduti già salvati per il mese selezionato
+// Mostra nel form i goduti già salvati per il mese selezionato (e le sue giornate)
 function precompilaMese() {
   const i = MESI.indexOf(mese.value);
   const m = ultimiDati && i >= 0 ? ultimiDati.mesi[i] : null;
   ferie.value = m ? m.godF : '';
   permessi.value = m ? m.godP : '';
+  renderGiornate();
 }
 mese.addEventListener('change', precompilaMese);
+
+// ---------------------------------------------------------------------------
+// Goduti per giorno: il totale del mese lo ricalcola il trigger su goduti_giornalieri
+// ---------------------------------------------------------------------------
+
+const giornateCard = $('giornateCard');
+const giornataForm = $('giornataForm');
+const giornataData = $('giornataData');
+const giornataFerie = $('giornataFerie');
+const giornataPermessi = $('giornataPermessi');
+const giornataNota = $('giornataNota');
+const btnAggiungiGiornata = $('btnAggiungiGiornata');
+const giornateMsg = $('giornateMsg');
+
+function giornateMeseSelezionato() {
+  const i = MESI.indexOf(mese.value);
+  if (!ultimiDati || !ultimiDati.giornate || i < 0) return [];
+  return giornateDelMese(ultimiDati.giornate, ultimiDati.anno, i);
+}
+
+// Con il dettaglio giornaliero il totale del mese non si modifica a mano (si sommerebbe due volte)
+function aggiornaBloccoMese(bloccato) {
+  ferie.disabled = bloccato;
+  permessi.disabled = bloccato;
+  btnSalva.disabled = bloccato;
+  $('meseHint').textContent = bloccato
+    ? `Il totale di ${MESI_LABEL[MESI.indexOf(mese.value)]} è la somma delle giornate qui sotto: modifica quelle.`
+    : '';
+}
+
+function renderGiornate() {
+  const i = MESI.indexOf(mese.value);
+  giornateMsg.textContent = '';
+  if (!ultimiDati || i < 0) {
+    giornateCard.style.display = 'none';
+    aggiornaBloccoMese(false);
+    return;
+  }
+  giornateCard.style.display = 'block';
+  $('giornateMese').textContent = `${MESI_LABEL[i]} ${ultimiDati.anno}`;
+  const lista = $('giornateLista');
+
+  if (ultimiDati.giornate === null) {
+    // Tabella non ancora creata su Supabase
+    aggiornaBloccoMese(false);
+    $('giornateTotale').textContent = '';
+    giornataForm.style.display = 'none';
+    lista.innerHTML = '<p class="giornate-vuoto">Dettaglio giornaliero non ancora attivo: va lanciato <code>supabase/giornate.sql</code> su Supabase.</p>';
+    return;
+  }
+  giornataForm.style.display = '';
+
+  const giornate = giornateMeseSelezionato();
+  aggiornaBloccoMese(giornate.length > 0);
+  const m = ultimiDati.mesi[i];
+  $('giornateTotale').textContent = `Totale mese: F ${fmtIT(m.godF)}h · P ${fmtIT(m.godP)}h`;
+
+  const { min, max } = limitiMese(parseInt(ultimiDati.anno, 10), i);
+  giornataData.min = min;
+  giornataData.max = max;
+  if (!giornataData.value || giornataData.value < min || giornataData.value > max) {
+    const oggi = new Date();
+    const oggiISO = `${oggi.getFullYear()}-${String(oggi.getMonth() + 1).padStart(2, '0')}-${String(oggi.getDate()).padStart(2, '0')}`;
+    giornataData.value = oggiISO >= min && oggiISO <= max ? oggiISO : min;
+  }
+
+  if (giornate.length === 0) {
+    lista.innerHTML = (m.godF > 0 || m.godP > 0)
+      ? `<p class="giornate-vuoto">Il totale di ${MESI_LABEL[i]} è stato registrato senza dettaglio. Aggiungendo una giornata, quel totale resta come voce di riporto.</p>`
+      : `<p class="giornate-vuoto">Nessuna giornata registrata in ${MESI_LABEL[i]}.</p>`;
+    return;
+  }
+
+  const dataIT = (d) => { const [y, mm, dd] = d.split('-'); return `${dd}/${mm}/${y}`; };
+  lista.innerHTML = `
+    <table class="giornate-table">
+      <thead><tr><th>Data</th><th class="num">Ferie</th><th class="num">Permessi</th><th>Nota</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>`;
+  const tbody = lista.querySelector('tbody');
+  giornate.forEach(g => {
+    const tr = document.createElement('tr');
+    if (g.riporto) tr.className = 'riporto';
+    tr.innerHTML = `
+      <td>${g.riporto ? 'Riporto' : dataIT(g.data)}</td>
+      <td class="num">${fmtIT(parseFloat(g.ferie_ore))}</td>
+      <td class="num">${fmtIT(parseFloat(g.permessi_ore))}</td>
+      <td class="nota"></td>
+      <td class="elimina"><button type="button" title="Elimina">✕</button></td>`;
+    tr.querySelector('.nota').textContent = g.nota || ''; // testo libero: mai come HTML
+    tr.querySelector('button').addEventListener('click', () => eliminaGiornata(g));
+    tbody.appendChild(tr);
+  });
+}
+
+giornataForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const i = MESI.indexOf(mese.value);
+  if (!ultimiDati || !ultimiDati.giornate || i < 0) return;
+  giornateMsg.textContent = '';
+
+  let piano;
+  try {
+    if (giornataFerie.validity.badInput || giornataPermessi.validity.badInput) throw new ErroreValidazione('Ore non valide.');
+    const m = ultimiDati.mesi[i];
+    piano = pianificaGiornata(
+      { data: giornataData.value, ferie: giornataFerie.value, permessi: giornataPermessi.value, nota: giornataNota.value },
+      { anno: ultimiDati.anno, i, godF: m.godF, godP: m.godP, numeroGiornate: giornateMeseSelezionato().length }
+    );
+  } catch (err) {
+    segnalaErrore(err, 'Giornata', giornateMsg);
+    return;
+  }
+  if (piano.riporto) {
+    const r = piano.riporto;
+    const ok = confirm(`${MESI_LABEL[i]} ha già un totale senza dettaglio (ferie ${fmtIT(r.ferie_ore)}, permessi ${fmtIT(r.permessi_ore)}).\n\n` +
+      `Lo tengo come voce di riporto e aggiungo la giornata?`);
+    if (!ok) return;
+  }
+
+  btnAggiungiGiornata.disabled = true;
+  try {
+    // Prima il riporto, poi la giornata: se la seconda fallisce il totale del mese resta quello di prima
+    if (piano.riporto) await query(`Riporto di ${MESI_LABEL[i]}`, sb.from(GIORNATE_TABLE).insert(piano.riporto));
+    await query('Aggiunta giornata', sb.from(GIORNATE_TABLE).insert(piano.riga));
+    giornataFerie.value = '';
+    giornataPermessi.value = '';
+    giornataNota.value = '';
+    if (await caricaGriglia()) show(`Giornata del ${giornataData.value.split('-').reverse().join('/')} aggiunta.`, 'ok');
+  } catch (err) {
+    segnalaErrore(err, 'Aggiunta giornata', giornateMsg);
+  } finally {
+    btnAggiungiGiornata.disabled = false;
+  }
+});
+
+async function eliminaGiornata(g) {
+  const cosa = g.riporto ? 'la voce di riporto' : `la giornata del ${g.data.split('-').reverse().join('/')}`;
+  if (!confirm(`Elimino ${cosa} (ferie ${fmtIT(parseFloat(g.ferie_ore))}, permessi ${fmtIT(parseFloat(g.permessi_ore))})?`)) return;
+  try {
+    await query('Eliminazione giornata', sb.from(GIORNATE_TABLE).delete().eq('id', g.id));
+    if (await caricaGriglia()) show('Giornata eliminata.', 'ok');
+  } catch (err) {
+    segnalaErrore(err, 'Eliminazione giornata', giornateMsg);
+  }
+}
 
 // Griglia vuota senza numeri: nessun anno, oppure lettura fallita (mai residui parziali)
 function svuotaGriglia(messaggio) {
@@ -275,6 +437,10 @@ async function inviaDati() {
     show('Dati dell\'anno non caricati: attendi o ricarica la pagina prima di salvare.', 'err');
     return;
   }
+  if (giornateMeseSelezionato().length > 0) {
+    show(`${MESI_LABEL[i]} ha il dettaglio giornaliero: modifica le giornate.`, 'err');
+    return;
+  }
 
   let piano;
   try {
@@ -307,7 +473,8 @@ async function inviaDati() {
   } catch (e) {
     segnalaErrore(e, `Salvataggio di ${MESI_LABEL[i]}`);
   } finally {
-    btnSalva.disabled = false;
+    // Riattiva il form, a meno che il mese selezionato abbia il dettaglio giornaliero
+    aggiornaBloccoMese(giornateMeseSelezionato().length > 0);
   }
 }
 

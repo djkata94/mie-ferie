@@ -455,3 +455,50 @@ tr.row-mese { cursor: pointer; }
 
 .report-section code { font-family: 'IBM Plex Mono', monospace; color: var(--brass); }
 #storicoLista .info-msg { color: var(--muted); padding: 12px 0; }
+
+/* Goduti per giorno */
+.mese-hint { grid-column: 1 / -1; margin: 0; font-size: 0.78rem; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+.mese-hint:empty { display: none; }
+.giornate-card {
+  margin-top: 22px; background: #1b1c15; padding: 22px; border-radius: 10px;
+  border: 1px solid rgba(238,231,216,0.10); position: relative;
+}
+.giornate-card::before {
+  content: "DETTAGLIO GIORNALIERO";
+  position: absolute; top: -11px; left: 20px; background: #121309; padding: 0 8px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; letter-spacing: 0.14em; color: #8faa7f;
+}
+.giornate-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.giornate-header h3 { margin: 0; font-family: 'Fraunces', serif; font-size: 1.15rem; color: var(--brass); }
+.giornate-totale { font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: var(--muted); }
+.giornate-vuoto { color: var(--muted); font-size: 0.85rem; margin: 0 0 14px 0; }
+.giornate-table { width: 100%; min-width: 0; border-collapse: collapse; margin-bottom: 16px; }
+.giornate-table td, .giornate-table th { padding: 9px 10px; font-size: 0.85rem; }
+.giornate-table td:first-child { font-family: 'IBM Plex Mono', monospace; font-weight: 400; }
+.giornate-table .num { font-family: 'IBM Plex Mono', monospace; text-align: right; white-space: nowrap; }
+.giornate-table .nota { color: var(--muted); word-break: break-word; }
+.giornate-table .riporto td { font-style: italic; color: var(--muted); }
+.giornate-table .elimina { width: 1%; text-align: right; }
+.giornate-table .elimina button { padding: 4px 10px; background: none; border: 1px solid rgba(238,231,216,0.25); color: #eee7d6; font-size: 0.75rem; }
+.giornate-table .elimina button:hover { border-color: var(--err); color: var(--err); box-shadow: none; }
+.giornata-form { display: grid; grid-template-columns: 1.2fr 0.8fr 0.8fr 2fr auto; gap: 12px; align-items: end; }
+.giornate-msg { margin: 10px 0 0 0; min-height: 1em; font-size: 0.8rem; color: var(--err); }
+.giornate-msg:empty { display: none; }
+@media (max-width: 700px) {
+  .giornata-form { grid-template-columns: 1fr 1fr; }
+  .giornata-form > div:first-child, .giornata-form .giornata-nota, .giornata-form button { grid-column: 1 / -1; }
+  .giornate-table thead { display: none; }
+  /* Una giornata = una riga compatta: data · ferie · permessi · ✕, sotto la nota */
+  .giornate-table tbody tr {
+    display: grid; grid-template-columns: 1fr auto auto auto; gap: 4px 12px; align-items: center;
+    padding: 10px 2px; border-bottom: 1px solid rgba(238,231,216,0.08);
+  }
+  .giornate-table td { display: block; padding: 0; border: none; }
+  .giornate-table td.num::before { font-size: 0.65rem; color: var(--muted); margin-right: 4px; }
+  .giornate-table td.num:nth-child(2)::before { content: "F"; }
+  .giornate-table td.num:nth-child(3)::before { content: "P"; }
+  .giornate-table td.nota { grid-column: 1 / -1; grid-row: 2; font-size: 0.8rem; }
+  .giornate-table td.nota:empty { display: none; }
+  .giornate-table .elimina button { min-height: 36px; min-width: 36px; }
+}
+@media print { .giornate-card { display: none !important; } }

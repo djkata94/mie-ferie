@@ -6,9 +6,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <!-- Icone: .ico per preferiti e browser vecchi, SVG per i browser moderni,
+       apple-touch-icon per la schermata Home di iPhone/iPad, manifest per Android (genera_icone.js) -->
+  <link rel="icon" href="icons/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="icons/favicon-32.png" type="image/png" sizes="32x32">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" sizes="180x180">
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#121309">
+  <meta name="apple-mobile-web-app-title" content="Mie Ferie">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <!-- Versione fissa: un aggiornamento di supabase-js non cambia il sito senza che ce ne accorgiamo -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
   <script src="supabase-config.js"></script>
@@ -96,8 +105,38 @@
       <input type="number" id="permessi" step="0.01" placeholder="Ore">
     </div>
     <button id="btnSalva" onclick="inviaDati()">Salva</button>
+    <p id="meseHint" class="mese-hint"></p>
   </div>
   <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <!-- Goduti per giorno del mese selezionato (tabella goduti_giornalieri, vedi supabase/giornate.sql) -->
+  <div id="giornateCard" class="giornate-card" style="display:none;">
+    <div class="giornate-header">
+      <h3>Giornate di <span id="giornateMese"></span></h3>
+      <span id="giornateTotale" class="giornate-totale"></span>
+    </div>
+    <div id="giornateLista"></div>
+    <form id="giornataForm" class="giornata-form" novalidate>
+      <div>
+        <label for="giornataData">Data</label>
+        <input type="date" id="giornataData" required>
+      </div>
+      <div>
+        <label for="giornataFerie">Ferie (ore)</label>
+        <input type="number" id="giornataFerie" step="0.25" min="0" max="24" placeholder="0" inputmode="decimal">
+      </div>
+      <div>
+        <label for="giornataPermessi">Permessi (ore)</label>
+        <input type="number" id="giornataPermessi" step="0.25" min="0" max="24" placeholder="0" inputmode="decimal">
+      </div>
+      <div class="giornata-nota">
+        <label for="giornataNota">Nota</label>
+        <input type="text" id="giornataNota" maxlength="200" placeholder="facoltativa">
+      </div>
+      <button type="submit" id="btnAggiungiGiornata">Aggiungi</button>
+    </form>
+    <p id="giornateMsg" class="giornate-msg"></p>
+  </div>
 
   <!-- Report / riepilogo annuale -->
   <div id="reportSection" class="report-section" style="display:none;">
