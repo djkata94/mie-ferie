@@ -38,7 +38,7 @@ body {
   font-size: 2rem;
   letter-spacing: -0.5px;
 }
-.header-container h2 i { color: #c99a4a; margin-right: 12px; }
+.header-container h2 .ico { color: #c99a4a; margin-right: 12px; vertical-align: -0.1em; }
 
 .select-anno-wrapper { display: flex; align-items: center; gap: 10px; }
 .select-anno-wrapper label {
@@ -358,7 +358,7 @@ body.non-autenticato .login-overlay { display: flex; }
 @media (max-width: 700px) {
   body { padding: 16px 10px 40px; }
   .header-container h2 { font-size: clamp(1.4rem, 6vw, 2rem); }
-  .header-container h2 i { margin-right: 8px; }
+  .header-container h2 .ico { margin-right: 8px; }
   .select-anno-wrapper { width: 100%; flex-wrap: wrap; }
   #selAnno { flex: 1; min-width: 120px; }
 
@@ -432,3 +432,6 @@ body.non-autenticato .login-overlay { display: flex; }
   .report-row-sel { background: #f3f3f3 !important; }
   .report-res-warn { color: #000 !important; text-decoration: underline; }
 }
+
+/* Righe dei mesi cliccabili: selezionano il mese nel form */
+tr.row-mese { cursor: pointer; }

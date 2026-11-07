@@ -97,7 +97,6 @@ supabase-config.js  # URL e anon key Supabase
 supabase/
   rls.sql           # policy RLS "solo proprietario"
 data/
-  anni.json         # fallback legacy (il sito usa la tabella "anni" di Supabase)
   Mie Ferie - YYYY.csv  # SOLO in locale, ignorati da git
 scripts/
   lib.js              # funzioni comuni (parser CSV, upsert REST con service key)
@@ -122,10 +121,17 @@ node scripts/import_goduti.js 2026         # scrive goduti (ferie_mensili) e AP 
 Entrambi fanno upsert, quindi sono rieseguibili. `import_goduti.js` salta i mesi con
 entrambe le celle vuote e non tocca l'AP se la colonna B del CSV è vuota.
 
+## Registrare i goduti
+
+- Scegli il mese nel form (o clicca la sua riga nella griglia): i campi mostrano le ore già salvate.
+- Un campo lasciato **vuoto** non viene modificato; per azzerare scrivi **0**.
+- Se il salvataggio cambia un valore già registrato (diverso da 0) il sito chiede conferma mostrando il prima → dopo.
+- Valori ammessi: da 0 a 200 ore al mese.
+
 ## Aggiungere un nuovo anno
 
 1. Tasto **⚙** nel sito (accanto al selettore anni) → **Aggiungi** l'anno. Viene salvato su Supabase e selezionato.
-2. Imposta l'AP dal popup (verrà suggerito automaticamente il residuo dicembre dell'anno precedente, se disponibile).
+2. Imposta l'AP con il bottone **Imposta AP** della barra (il popup si apre da solo solo per l'anno in corso), precompilato con il residuo di dicembre dell'anno precedente.
 3. Per la maturazione: esporta il foglio anno dal Google Sheet in CSV, salvalo come `data/Mie Ferie - <ANNO>.csv` ed esegui `node scripts/load_maturation.js` (oppure usa il popup **📁** nel sito per caricare il singolo CSV dall'interfaccia).
 
 **Nuovi pulsanti nell'interfaccia:**
@@ -160,7 +166,7 @@ valutare un eventuale pannello admin per modificare la maturazione direttamente 
 
 ### 2. Gestione anni dinamica da Supabase ✅ (fatto)
 La lista anni viene dalla tabella `anni`, gestibile dal sito con il pulsante ⚙
-(popup "Gestisci anni" con Aggiungi/Rimuovi). `anni.json` resta solo come fallback.
+(popup "Gestisci anni" con Aggiungi/Rimuovi). Togliere un anno lo nasconde dalla lista ma non cancella goduti, AP e maturazione.
 
 ### 3. Sistema di blocco AP più pulito ✅ (fatto)
 La tabella `anno_ap` ha il campo `ap_configurato` (boolean). Il sito tratta l'AP come

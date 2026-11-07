@@ -36,26 +36,27 @@ const btnChiudiAnni = document.getElementById('btnChiudiAnni');
 const anniMsg = document.getElementById('anniMsg');
 const popupMaturation = document.getElementById('popupMaturation');
 const maturationFileInput = document.getElementById('maturationFileInput');
-const btnImportaMaturation = document.getElementById('btnImportaMaturation');
-const btnChiudiMaturation = document.getElementById('btnChiudiMaturation');
+const btnConfermaMaturation = document.getElementById('btnConfermaMaturation');
 const maturationMsg = document.getElementById('maturationMsg');
 
+// Messaggio di stato sotto il form. Un solo timer: un messaggio nuovo non viene
+// nascosto dal timer di quello precedente; gli errori restano finché non arriva altro.
+let showTimer = null;
 function show(testo, tipo = 'info') {
+  clearTimeout(showTimer);
   status.textContent = testo;
   status.style.color = tipo === 'ok' ? '#4ade80' : (tipo === 'err' ? '#f87171' : '#c99a4a');
   status.style.display = testo ? 'block' : 'none';
-  if (tipo !== 'err') setTimeout(() => { status.style.display = 'none'; }, 3000);
+  if (testo && tipo !== 'err') showTimer = setTimeout(() => { status.style.display = 'none'; }, 3000);
 }
 
 // Popup per importazione maturazione
 function apriPopupMaturation() {
-  importMaturationOpen = true;
   if (maturationFileInput) maturationFileInput.value = '';
   if (maturationMsg) maturationMsg.textContent = '';
   if (popupMaturation) popupMaturation.style.display = 'flex';
 }
 function chiudiPopupMaturation() {
-  importMaturationOpen = false;
   if (maturationMsg) maturationMsg.textContent = '';
   if (popupMaturation) popupMaturation.style.display = 'none';
 }
@@ -95,7 +96,7 @@ async function importaMaturationDaFile() {
     upsertRows.push({ anno: parseInt(anno, 10), mese, ferie_maturata: f, permessi_maturati: p });
   }
 
-  btnImportaMaturation.disabled = true;
+  btnConfermaMaturation.disabled = true;
   try {
     for (const r of upsertRows) {
       await salvaMaturazione(r.anno, r.mese, r.ferie_maturata, r.permessi_maturati);
@@ -106,7 +107,7 @@ async function importaMaturationDaFile() {
   } catch (e) {
     show('Errore durante l importazione: ' + e.message, 'err');
   } finally {
-    btnImportaMaturation.disabled = false;
+    btnConfermaMaturation.disabled = false;
   }
 }
 
@@ -335,17 +336,9 @@ async function caricaReport() {
 
 // Gestione anni da Supabase
 async function caricaAnniDaSupabase() {
-  try {
-    const { data, error } = await sb.from(ANNI_TABLE).select('anno').order('anno', { ascending: true });
-    if (error) {
-      console.error('Errore caricaAnniDaSupabase:', error);
-      return null;
-    }
-    return data ? data.map(r => String(r.anno)) : null;
-  } catch (e) {
-    console.error('Eccezione caricaAnniDaSupabase:', e);
-    return null;
-  }
+  const { data, error } = await sb.from(ANNI_TABLE).select('anno').order('anno', { ascending: true });
+  if (error) throw new Error('lettura anni: ' + error.message);
+  return (data || []).map(r => String(r.anno));
 }
 
 async function aggiungiAnno(anno) {
@@ -367,6 +360,13 @@ function chiudiPopupAP() {
 if (btnAnnullaAP) btnAnnullaAP.addEventListener('click', chiudiPopupAP);
 if (popupAP) popupAP.addEventListener('click', (e) => {
   if (e.target === popupAP) chiudiPopupAP();
+});
+
+// Bottone "Imposta AP" della barra: popup con il suggerimento calcolato per l'anno a video
+btnModificaAP?.addEventListener('click', () => {
+  if (!currentAnno) return;
+  const d = ultimiDati && String(ultimiDati.anno) === String(currentAnno) ? ultimiDati : null;
+  apriPopupAP(currentAnno, d ? d.suggerimentoF : '', d ? d.suggerimentoP : '');
 });
 
 function apriPopupAP(anno, suggerimentoF, suggerimentoP) {
@@ -433,8 +433,8 @@ function aggiornaListaAnni() {
 
 async function aggiungiAnnoDaUI() {
   const anno = nuovoAnnoInput ? nuovoAnnoInput.value : '';
-  if (!anno || isNaN(parseInt(anno, 10))) {
-    if (anniMsg) anniMsg.textContent = 'Inserisci un anno valido.';
+  if (!/^\d{4}$/.test(anno) || anno < '2000' || anno > '2100') {
+    if (anniMsg) anniMsg.textContent = 'Inserisci un anno valido (2000–2100).';
     return;
   }
   if (anni.includes(anno)) {
@@ -464,19 +464,18 @@ async function aggiungiAnnoDaUI() {
 }
 
 async function rimuoviAnnoDaUI(anno) {
-  if (!confirm('Rimuovere l\'anno ' + anno + '?')) return;
+  const msg = `Togliere il ${anno} dalla lista degli anni?\n\n` +
+    `Goduti, AP e maturazione del ${anno} restano salvati: se riaggiungi l'anno ricompaiono.`;
+  if (!confirm(msg)) return;
   try {
     await rimuoviAnno(anno);
+    const eraVisualizzato = currentAnno === anno;
     anni = anni.filter(a => a !== anno);
     aggiornaSelectAnni();
     aggiornaListaAnni();
-    show('Anno ' + anno + ' rimosso.', 'ok');
-    // Se l'anno rimosso era selezionato, seleziona il primo disponibile
-    if (currentAnno === anno && anni.length > 0) {
-      selAnno.value = anni[0];
-      currentAnno = anni[0];
-      caricaGriglia();
-    }
+    show('Anno ' + anno + ' tolto dalla lista.', 'ok');
+    // aggiornaSelectAnni ha già scelto un altro anno (o nessuno): ricarica se la griglia mostrava quello tolto
+    if (eraVisualizzato) caricaGriglia();
   } catch (e) {
     if (anniMsg) anniMsg.textContent = 'Errore: ' + e.message;
   }
@@ -585,8 +584,16 @@ function render(dati) {
     gridBody.appendChild(trAP);
   }
 
-  dati.mesi.forEach(m => {
+  dati.mesi.forEach((m, i) => {
     const tr = document.createElement('tr');
+    tr.className = 'row-mese';
+    tr.title = 'Modifica ' + m.nome;
+    // Clic su un mese = lo seleziona nel form con i valori già salvati
+    tr.addEventListener('click', () => {
+      mese.value = MESI[i];
+      precompilaMese();
+      ferie.focus();
+    });
     tr.innerHTML = `
       <td data-label="Mese">${m.nome}</td>
       <td class="god-val" data-label="Godute (F/P)">${fmtIT(m.godF)} / ${fmtIT(m.godP)}</td>
@@ -609,66 +616,137 @@ function render(dati) {
     sogliaContainer.style.display = 'none';
   }
 
-  mese.value = MESI[new Date().getMonth()];
-  ferie.value = '';
-  permessi.value = '';
+  precompilaMese();
 }
 
+// Mostra nel form i goduti già salvati per il mese selezionato
+function precompilaMese() {
+  const i = MESI.indexOf(mese.value);
+  const m = ultimiDati && i >= 0 ? ultimiDati.mesi[i] : null;
+  ferie.value = m ? m.godF : '';
+  permessi.value = m ? m.godP : '';
+}
+mese.addEventListener('change', precompilaMese);
+
+// Griglia vuota quando non c'è nessun anno (es. dopo averli rimossi tutti)
+function mostraNessunAnno() {
+  ultimiDati = null;
+  currentAnno = null;
+  if (apBar) apBar.style.display = 'none';
+  const soglia = document.getElementById('sogliaAlert');
+  if (soglia) soglia.style.display = 'none';
+  gridBody.innerHTML = `<tr class="row-info"><td colspan="5" class="info-msg">Nessun anno: aggiungine uno con ⚙.</td></tr>`;
+  precompilaMese();
+}
+
+let caricamentoId = 0;
 async function caricaGriglia() {
   const anno = selAnno.value;
-  if (!anno) return;
+  if (!anno) { mostraNessunAnno(); return true; }
   currentAnno = anno;
+  // Se si cambia anno prima che il caricamento precedente finisca, vince l'ultimo
+  const mioId = ++caricamentoId;
+  ultimiDati = null;
   show('Caricamento...', 'info');
   gridBody.innerHTML = '';
   if (apBar) apBar.style.display = 'none';
 
   try {
     const dati = await calcolaAnno(anno);
+    if (mioId !== caricamentoId) return false;
     ultimiDati = dati;
     render(dati);
 
-    // Se l'AP non è ancora configurato, apri il popup dopo breve ritardo
-    if (!dati.apBloccato) {
+    // Popup AP automatico solo per l'anno in corso; per gli altri anni basta la barra "Imposta AP"
+    if (!dati.apBloccato && anno === String(new Date().getFullYear())) {
       setTimeout(() => {
         apriPopupAP(anno, dati.suggerimentoF, dati.suggerimentoP);
       }, 400);
     }
 
     show('', 'info');
+    return true;
   } catch (e) {
+    if (mioId !== caricamentoId) return false;
     show('Errore nel caricamento: ' + e.message, 'err');
+    return false;
   }
+}
+
+const MAX_ORE_MESE = 200;
+
+// Legge un campo ore: vuoto = "non modificare" (null), altrimenti numero tra 0 e MAX_ORE_MESE
+function leggiOre(input, nome) {
+  // Con type="number" un testo non valido arriva come stringa vuota: non va scambiato per "vuoto"
+  if (input.validity && input.validity.badInput) throw new Error(`${nome}: valore non valido.`);
+  const s = input.value.trim();
+  if (s === '') return null;
+  const n = parseFloat(s.replace(',', '.'));
+  if (!isFinite(n) || n < 0) throw new Error(`${nome}: inserisci un numero di ore maggiore o uguale a 0.`);
+  if (n > MAX_ORE_MESE) throw new Error(`${nome}: ${fmtIT(n)} ore in un mese sono troppe (massimo ${MAX_ORE_MESE}).`);
+  return Math.round(n * 100) / 100;
 }
 
 async function inviaDati() {
   const anno = selAnno.value;
   const m = mese.value;
-  const f = ferie.value;
-  const p = permessi.value;
+  const i = MESI.indexOf(m);
+  if (!anno || i < 0 || !ultimiDati || String(ultimiDati.anno) !== String(anno)) {
+    show('Attendi il caricamento dell\'anno prima di salvare.', 'err');
+    return;
+  }
+
+  let nuovaF, nuovaP;
+  try {
+    nuovaF = leggiOre(ferie, 'Ferie');
+    nuovaP = leggiOre(permessi, 'Permessi');
+  } catch (e) {
+    show(e.message, 'err');
+    return;
+  }
+  if (nuovaF === null && nuovaP === null) {
+    show('Inserisci le ore di ferie o di permessi (0 per azzerare).', 'err');
+    return;
+  }
+
+  // Campo vuoto = mantieni il valore attuale (prima veniva salvato 0, cancellando il dato)
+  const attuale = ultimiDati.mesi[i];
+  const f = nuovaF === null ? attuale.godF : nuovaF;
+  const p = nuovaP === null ? attuale.godP : nuovaP;
+
+  const cambi = [];
+  if (f !== attuale.godF) cambi.push({ nome: 'Ferie', da: attuale.godF, a: f });
+  if (p !== attuale.godP) cambi.push({ nome: 'Permessi', da: attuale.godP, a: p });
+  if (cambi.length === 0) {
+    show('Nessuna modifica da salvare.', 'info');
+    return;
+  }
+  // Conferma solo se si sovrascrive un valore già registrato (diverso da 0)
+  const sovrascritti = cambi.filter(c => c.da !== 0);
+  if (sovrascritti.length > 0) {
+    const righe = sovrascritti.map(c => `${c.nome} di ${MESI_LABEL[i]}: ${fmtIT(c.da)} → ${fmtIT(c.a)}`).join('\n');
+    if (!confirm(`Modifico i valori già salvati?\n\n${righe}`)) return;
+  }
+
   btnSalva.disabled = true;
   show('Invio in corso...', 'info');
-
   try {
     const { error } = await sb
       .from('ferie_mensili')
       .upsert({
         anno: parseInt(anno, 10),
         mese: m,
-        ferie_ore: parseFloat(f) || 0,
-        permessi_ore: parseFloat(p) || 0,
+        ferie_ore: f,
+        permessi_ore: p,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'anno, mese' });
-
+      }, { onConflict: 'anno,mese' });
     if (error) throw error;
 
-    show('Salvato.', 'ok');
-    btnSalva.disabled = false;
-    setTimeout(() => { status.style.display = 'none'; }, 3000);
-    ferie.value = '';
-    permessi.value = '';
-    caricaGriglia();
+    if (await caricaGriglia()) show(`Salvato ${MESI_LABEL[i]}.`, 'ok');
+    else show(`Salvato ${MESI_LABEL[i]}, ma la griglia non si è ricaricata: aggiorna la pagina.`, 'err');
   } catch (e) {
     show('Errore salvataggio: ' + e.message, 'err');
+  } finally {
     btnSalva.disabled = false;
   }
 }
@@ -696,19 +774,12 @@ document.getElementById('btnChiudiReport')?.addEventListener('click', chiudiRepo
 document.getElementById('btnStampaReport')?.addEventListener('click', stampaReport);
 
 async function loadAnni() {
-  // Prova da Supabase (tabella anni)
-  const anniSupabase = await caricaAnniDaSupabase();
-  if (anniSupabase && anniSupabase.length > 0) {
-    anni = anniSupabase;
-  } else {
-    // Fallback a anni.json (legacy)
-    try {
-      const r = await fetch('data/anni.json');
-      if (r.ok) anni = await r.json();
-    } catch (e) {}
-    if (!anni || anni.length === 0) {
-      anni = ["2026","2027","2028","2029","2030"];
-    }
+  // Gli anni stanno solo nella tabella "anni" (niente più anni.json né lista fissa)
+  try {
+    anni = await caricaAnniDaSupabase();
+  } catch (e) {
+    show('Errore nel caricamento: ' + e.message, 'err');
+    return;
   }
   aggiornaSelectAnni();
   impostaMeseCorrente();
