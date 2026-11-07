@@ -102,12 +102,15 @@ supabase/
   rls.sql           # policy RLS "solo proprietario"
   storico.sql       # tabella storico_goduti + trigger su ferie_mensili
   giornate.sql      # tabella goduti_giornalieri + trigger che ricalcola il totale del mese
+  impostazioni.sql  # tabella ferie_impostazioni (orario di lavoro, formato ore)
 tests/
   logica.test.js    # test dei calcoli con i valori del foglio 2026
 data/
   Mie Ferie - YYYY.csv  # SOLO in locale, ignorati da git
 scripts/
-  lib.js              # upsert REST con service key (parser CSV preso da logica.js)
+  lib.js              # lettura/upsert REST con la chiave di servizio (parser CSV preso da logica.js)
+  backup.js           # backup JSON di tutte le tabelle (ultime 30 copie in backup/auto)
+  installa_backup.ps1 # registra l'attività pianificata di Windows "mie-ferie backup"
   load_maturation.js  # importa la maturazione dai CSV a Supabase
   import_goduti.js    # importa goduti e AP di un anno da CSV a Supabase
   serve.js            # server statico minimo per test locali (node scripts/serve.js)
@@ -116,9 +119,10 @@ scripts/
 
 ## Importare i CSV in Supabase
 
-Requisiti: **Node.js 22+** (nessun `npm install`) e la **service role key** di Supabase
-(Project Settings → API) nella variabile `SUPABASE_SERVICE_KEY`. I CSV vanno messi in
-`data/` (restano fuori da git).
+Requisiti: **Node.js 22+** (nessun `npm install`) e la **chiave di servizio** di Supabase
+(Project Settings → API Keys, la *secret* `sb_secret_…` o la vecchia *service_role*), nella variabile
+`SUPABASE_SERVICE_KEY` oppure nel file `%USERPROFILE%\.mie-ferie\service_role.key` (fuori dalla repo).
+I CSV vanno messi in `data/` (restano fuori da git).
 
 ```powershell
 $env:SUPABASE_SERVICE_KEY = "<service role key>"
@@ -135,7 +139,7 @@ entrambe le celle vuote e non tocca l'AP se la colonna B del CSV è vuota.
 - Scegli il mese nel form (o clicca la sua riga nella griglia): i campi mostrano le ore già salvate.
 - Un campo lasciato **vuoto** non viene modificato; per azzerare scrivi **0**.
 - Se il salvataggio cambia un valore già registrato (diverso da 0) il sito chiede conferma mostrando il prima → dopo.
-- Valori ammessi: da 0 a 200 ore al mese.
+- Valori ammessi: da 0 a 200 ore al mese, scritti come decimali (`1,5`) o ore:minuti (`1:30`).
 
 ### Dettaglio giornaliero
 
@@ -148,19 +152,57 @@ delle giornate (`supabase/giornate.sql`), quindi griglia, report e storico resta
 - Un mese con il dettaglio giornaliero non si modifica più dal form del totale: si aggiungono o
   eliminano giornate.
 - Finché `giornate.sql` non è stato lanciato il pannello lo segnala e il resto funziona come prima.
+- **Entrato alle / Uscito alle**: il permesso si calcola dall'orario rispetto al turno impostato con ⏱
+  (la pausa non conta: uscire alle 13:00 con pausa 13–14 e fine 18:30 = 4:30). Se la nota è vuota viene
+  proposta da sola ("uscito 18:00").
+- **+15′ / +30′ / +45′ / +1h** aggiungono minuti di permesso al campo.
+- Le giornate con data futura sono **pianificate**: contano già nei totali (e quindi nei residui dei mesi
+  futuri) e sono evidenziate.
+- **⬇ Esporta CSV dell'anno**: tutte le giornate in un file per Excel (`;` e virgola decimale).
+
+## Impostazioni (⏱)
+
+Inizio e fine turno, pausa facoltativa e formato delle ore (**decimale** 7,50h oppure **ore e minuti**
+7:30). Stanno su Supabase (`ferie_impostazioni`), quindi valgono su tutti i dispositivi.
+
+## Previsione
+
+Sopra la griglia: residuo di oggi (mese corrente) e previsto a fine anno, giornate pianificate e un
+simulatore ("e se prendessi 40 ore di ferie ad agosto?") che mostra residuo del mese, punto più basso
+e fine anno senza salvare niente.
 
 ## Aggiungere un nuovo anno
 
 1. Tasto **⚙** nel sito (accanto al selettore anni) → **Aggiungi** l'anno. Viene salvato su Supabase e selezionato.
 2. Imposta l'AP con il bottone **Imposta AP** della barra (il popup si apre da solo solo per l'anno in corso), precompilato con il residuo di dicembre dell'anno precedente.
-3. Per la maturazione: esporta il foglio anno dal Google Sheet in CSV, salvalo come `data/Mie Ferie - <ANNO>.csv` ed esegui `node scripts/load_maturation.js` (oppure usa il popup **📁** nel sito per caricare il singolo CSV dall'interfaccia).
+3. Maturazione: popup **📁** → ore di ferie e permessi maturate al mese (proposte quelle dell'anno prima) → **Salva**. Il CSV del foglio serve solo se i mesi hanno valori diversi.
 
 **Nuovi pulsanti nell'interfaccia:**
-- **📁 Importa maturazione** – apre un popup per caricare un singolo CSV (`Mie Ferie - YYYY.csv`) direttamente dal sito.
+- **⏱ Impostazioni** – orario di lavoro e formato ore.
+- **📁 Maturazione** – ore maturate al mese dell'anno a video, oppure import di un CSV del foglio.
 - **💾 Esporta backup JSON** – scarica tutte le tabelle Supabase in un file JSON di backup locale.
 - **📊 Report** – mostra il riepilogo dell'anno (maturato, goduti, residuo) e il confronto tra tutti gli anni, con stampa/PDF.
 - **🕘 Storico** – elenco delle modifiche ai goduti dell'anno (quando, mese, prima → dopo). Serve `supabase/storico.sql`.
 - **⚠️ Avviso soglia 20h** – banner rosso che appare quando il residuo totale (ferie + permessi) dell'ultimo mese scende sotto 20h.
+
+## Backup automatico
+
+Il piano gratuito di Supabase non offre backup scaricabili, quindi c'è un backup locale giornaliero:
+
+- `scripts/backup.js` legge tutte le tabelle di mie-ferie con la chiave di servizio e salva
+  `backup/auto/mie-ferie-AAAA-MM-GG-hh-mm.json` (ignorato da git), tenendo le ultime 30 copie.
+  Esito in `backup/auto/backup.log`. Se la chiave non vede i dati (es. chiave anon) si ferma con errore
+  invece di salvare un backup vuoto.
+- L'attività pianificata di Windows **mie-ferie backup** lo lancia ogni giorno alle 13:00 (o appena il
+  PC è acceso). Si registra con:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\installa_backup.ps1
+```
+
+- Una volta sola: incollare la chiave di servizio di Supabase nel file
+  `%USERPROFILE%\.mie-ferie\service_role.key`. Prova manuale: `node scripts/backup.js`.
+- Per tenere una copia fuori dal PC: `MIE_FERIE_BACKUP_DIR` può puntare a una cartella di OneDrive.
 
 ## Icone e installazione
 

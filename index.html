@@ -51,7 +51,8 @@
       <label>Anno</label>
       <select id="selAnno" onchange="caricaGriglia()"></select>
       <button id="btnGestisciAnni" class="btn-icon" title="Gestisci anni" onclick="apriPopupAnni()">⚙</button>
-      <button id="btnImportaMaturation" class="btn-icon" title="Importa maturazione da CSV" onclick="apriPopupMaturation()">📁</button>
+      <button id="btnImpostazioni" class="btn-icon" title="Orario di lavoro e formato ore">⏱</button>
+      <button id="btnImportaMaturation" class="btn-icon" title="Maturazione dell'anno" onclick="apriPopupMaturation()">📁</button>
       <button id="btnExportBackup" class="btn-icon" title="Esporta backup JSON">💾</button>
       <button id="btnReport" class="btn-icon" title="Report annuale">📊</button>
       <button id="btnStorico" class="btn-icon" title="Storico modifiche goduti">🕘</button>
@@ -68,6 +69,37 @@
     <span id="apVal" class="ap-val">non impostato</span>
     <button id="btnModificaAP">Imposta AP</button>
   </div>
+
+  <!-- Previsione: residuo oggi e a fine anno, giornate pianificate, simulazione -->
+  <details id="previsioneCard" class="giornate-card previsione-card" style="display:none;">
+    <summary class="giornate-header">
+      <span class="giornate-titolo">
+        <svg class="giornate-freccia" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="giornate-h">Previsione <span id="previsioneAnno"></span></span>
+      </span>
+      <span id="previsioneSintesi" class="previsione-sintesi"></span>
+    </summary>
+    <div class="giornate-corpo">
+      <p id="previsionePianificate" class="previsione-pianificate"></p>
+      <form id="simulaForm" class="simula-form" novalidate>
+        <p class="simula-titolo">E se prendessi…</p>
+        <div>
+          <label for="simMese">Mese</label>
+          <select id="simMese"><option value="GENNAIO">Gennaio</option><option value="FEBBRAIO">Febbraio</option><option value="MARZO">Marzo</option><option value="APRILE">Aprile</option><option value="MAGGIO">Maggio</option><option value="GIUGNO">Giugno</option><option value="LUGLIO">Luglio</option><option value="AGOSTO">Agosto</option><option value="SETTEMBRE">Settembre</option><option value="OTTOBRE">Ottobre</option><option value="NOVEMBRE">Novembre</option><option value="DICEMBRE">Dicembre</option></select>
+        </div>
+        <div>
+          <label for="simFerie">Ferie (ore)</label>
+          <input type="text" id="simFerie" inputmode="decimal" placeholder="es. 40">
+        </div>
+        <div>
+          <label for="simPermessi">Permessi (ore)</label>
+          <input type="text" id="simPermessi" inputmode="decimal" placeholder="es. 4:30">
+        </div>
+        <button type="submit">Simula</button>
+      </form>
+      <div id="simEsito" class="sim-esito" aria-live="polite"></div>
+    </div>
+  </details>
 
   <div class="table-container">
     <table id="dataGrid">
@@ -86,7 +118,7 @@
 
   <div class="input-card">
     <div>
-      <label>Seleziona Mese</label>
+      <label for="mese">Seleziona Mese</label>
       <select id="mese">
         <option value="GENNAIO">Gennaio</option><option value="FEBBRAIO">Febbraio</option>
         <option value="MARZO">Marzo</option><option value="APRILE">Aprile</option>
@@ -97,12 +129,12 @@
       </select>
     </div>
     <div>
-      <label>Ferie Godute</label>
-      <input type="number" id="ferie" step="0.01" placeholder="Ore">
+      <label for="ferie">Ferie Godute</label>
+      <input type="text" id="ferie" inputmode="decimal" placeholder="Ore (es. 8 o 7:30)">
     </div>
     <div>
-      <label>Permessi Goduti</label>
-      <input type="number" id="permessi" step="0.01" placeholder="Ore">
+      <label for="permessi">Permessi Goduti</label>
+      <input type="text" id="permessi" inputmode="decimal" placeholder="Ore (es. 1,5 o 1:30)">
     </div>
     <button id="btnSalva" onclick="inviaDati()">Salva</button>
     <p id="meseHint" class="mese-hint"></p>
@@ -123,25 +155,43 @@
     <div class="giornate-corpo">
     <div id="giornateLista"></div>
     <form id="giornataForm" class="giornata-form" novalidate>
-      <div>
+      <div class="g-data">
         <label for="giornataData">Data</label>
         <input type="date" id="giornataData" required>
       </div>
-      <div>
+      <div class="g-entrata">
+        <label for="giornataEntrata">Entrato alle</label>
+        <input type="time" id="giornataEntrata">
+      </div>
+      <div class="g-uscita">
+        <label for="giornataUscita">Uscito alle</label>
+        <input type="time" id="giornataUscita">
+      </div>
+      <p id="turnoInfo" class="g-info turno-info"></p>
+      <div class="g-ferie">
         <label for="giornataFerie">Ferie (ore)</label>
-        <input type="number" id="giornataFerie" step="0.25" min="0" max="24" placeholder="0" inputmode="decimal">
+        <input type="text" id="giornataFerie" inputmode="decimal" placeholder="0">
       </div>
-      <div>
+      <div class="g-permessi">
         <label for="giornataPermessi">Permessi (ore)</label>
-        <input type="number" id="giornataPermessi" step="0.25" min="0" max="24" placeholder="0" inputmode="decimal">
+        <input type="text" id="giornataPermessi" inputmode="decimal" placeholder="0">
       </div>
-      <div class="giornata-nota">
+      <div class="g-rapidi" role="group" aria-label="Aggiungi minuti di permesso">
+        <button type="button" class="btn-rapido" data-minuti="15">+15′</button>
+        <button type="button" class="btn-rapido" data-minuti="30">+30′</button>
+        <button type="button" class="btn-rapido" data-minuti="45">+45′</button>
+        <button type="button" class="btn-rapido" data-minuti="60">+1h</button>
+      </div>
+      <div class="g-nota giornata-nota">
         <label for="giornataNota">Nota</label>
         <input type="text" id="giornataNota" maxlength="200" placeholder="facoltativa">
       </div>
-      <button type="submit" id="btnAggiungiGiornata">Aggiungi</button>
+      <button type="submit" id="btnAggiungiGiornata" class="g-azione">Aggiungi</button>
     </form>
     <p id="giornateMsg" class="giornate-msg"></p>
+    <div class="giornate-azioni">
+      <button type="button" id="btnEsportaGiornate" class="btn-secondario">⬇ Esporta CSV dell'anno</button>
+    </div>
     </div>
   </details>
 
@@ -203,18 +253,53 @@
   </div>
 </div>
 
-<!-- Popup per importare i dati di maturazione -->
+<!-- Popup maturazione: ore al mese dal sito, oppure CSV del foglio -->
 <div id="popupMaturation" class="popup">
   <div class="popup-content">
-    <h3>Importa Dati di Maturazione</h3>
-    <p>Seleziona un file CSV del tipo "Mie Ferie - YYYY.csv" per caricare i dati di maturazione (colonne ferie e permessi) in Supabase.</p>
+    <h3>Maturazione <span id="maturazioneAnno"></span></h3>
+    <form id="maturazioneForm" novalidate>
+      <p>Ore maturate ogni mese (le stesse per tutti i 12 mesi).</p>
+      <label for="maturazioneFerie">Ferie al mese</label>
+      <input type="text" id="maturazioneFerie" inputmode="decimal" placeholder="es. 13,33">
+      <label for="maturazionePermessi">Permessi al mese</label>
+      <input type="text" id="maturazionePermessi" inputmode="decimal" placeholder="es. 8,67">
+      <div class="popup-btns">
+        <button type="submit" id="btnSalvaMaturazione">Salva per il <span id="maturazioneAnnoBtn"></span></button>
+      </div>
+    </form>
+    <hr class="popup-sep">
+    <p>Oppure importa il CSV del foglio ("Mie Ferie - AAAA.csv"), se i mesi hanno valori diversi.</p>
     <input type="file" id="maturationFileInput" accept=".csv" style="margin-bottom:12px;">
     <div class="popup-btns">
-      <button id="btnConfermaMaturation" onclick="importaMaturationDaFile()">Importa</button>
-      <button type="button" id="btnChiudiMaturation" onclick="chiudiPopupMaturation()">Annulla</button>
+      <button id="btnConfermaMaturation" onclick="importaMaturationDaFile()">Importa CSV</button>
+      <button type="button" id="btnChiudiMaturation" onclick="chiudiPopupMaturation()">Chiudi</button>
     </div>
     <p id="maturationMsg" style="color:#f87171; font-size:0.8rem; margin-top:8px;"></p>
   </div>
+</div>
+
+<!-- Popup impostazioni: orario di lavoro (per i permessi da entrata/uscita) e formato ore -->
+<div id="popupImpostazioni" class="popup">
+  <form id="impostazioniForm" class="popup-content" novalidate>
+    <h3>Impostazioni</h3>
+    <p>Orario di lavoro: serve a calcolare i permessi da "entrato alle" e "uscito alle". La pausa non conta come permesso.</p>
+    <div class="imp-grid">
+      <div><label for="impInizio">Inizio turno</label><input type="time" id="impInizio" required></div>
+      <div><label for="impFine">Fine turno</label><input type="time" id="impFine" required></div>
+      <div><label for="impPausaInizio">Pausa dalle</label><input type="time" id="impPausaInizio"></div>
+      <div><label for="impPausaFine">Pausa alle</label><input type="time" id="impPausaFine"></div>
+    </div>
+    <fieldset class="imp-formato">
+      <legend>Formato delle ore</legend>
+      <label class="radio"><input type="radio" name="impFormato" value="decimale"> Decimale (7,50h)</label>
+      <label class="radio"><input type="radio" name="impFormato" value="hhmm"> Ore e minuti (7:30)</label>
+    </fieldset>
+    <div class="popup-btns">
+      <button type="submit" id="btnSalvaImpostazioni">Salva</button>
+      <button type="button" id="btnAnnullaImpostazioni">Annulla</button>
+    </div>
+    <p id="impMsg" class="login-msg"></p>
+  </form>
 </div>
 
 <script src="logica.js"></script>

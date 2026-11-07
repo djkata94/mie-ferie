@@ -112,11 +112,16 @@ class ErroreValidazione extends Error {
   }
 }
 
-// Campo ore del form: '' = "non modificare" (null), altrimenti numero tra 0 e MAX_ORE_MESE
+// Campo ore del form: '' = "non modificare" (null), altrimenti ore tra 0 e MAX_ORE_MESE.
+// Accetta decimali ("1,5", "1.5") e ore:minuti ("1:30").
 function parseOre(testo, nome) {
   const s = String(testo === undefined || testo === null ? '' : testo).trim();
   if (s === '') return null;
-  const n = Number(s.replace(',', '.'));
+  let n;
+  const hm = /^(\d{1,3}):([0-5]\d)$/.exec(s);
+  if (hm) n = parseInt(hm[1], 10) + parseInt(hm[2], 10) / 60;
+  else if (s.includes(':')) throw new ErroreValidazione(`${nome}: scrivi le ore come 1:30 oppure 1,5.`);
+  else n = Number(s.replace(',', '.'));
   if (!isFinite(n) || n < 0) throw new ErroreValidazione(`${nome}: inserisci un numero di ore maggiore o uguale a 0.`);
   if (n > MAX_ORE_MESE) throw new ErroreValidazione(`${nome}: ${fmtIT(n)} ore in un mese sono troppe (massimo ${MAX_ORE_MESE}).`);
   return arrotonda2(n);
@@ -193,6 +198,118 @@ function pianificaGiornata(input, mese) {
   };
 }
 
+// --- Formato delle ore: 'decimale' (7,50h) oppure 'hhmm' (7:30) ---
+
+// Testo da mostrare. unita = aggiunge "h" in formato decimale (in h:mm i due punti bastano).
+function formattaOre(n, formato, unita = true) {
+  if (formato === 'hhmm') {
+    const minuti = Math.round(Math.abs(n) * 60);
+    const segno = n < 0 && minuti > 0 ? '-' : '';
+    return `${segno}${Math.floor(minuti / 60)}:${String(minuti % 60).padStart(2, '0')}`;
+  }
+  return fmtIT(n) + (unita ? 'h' : '');
+}
+
+// Valore da mettere in un campo del form (rileggibile da parseOre)
+function oreInCampo(n, formato) {
+  if (formato === 'hhmm') return formattaOre(n, 'hhmm');
+  return String(arrotonda2(n)).replace('.', ',');
+}
+
+// --- Permesso calcolato dagli orari di entrata/uscita ---
+
+// "18:30" → 1110 minuti; null se non valido
+function minutiDaOrario(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(String(hhmm || '').trim());
+  if (!m) return null;
+  const h = parseInt(m[1], 10), min = parseInt(m[2], 10);
+  if (h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+// Ore di permesso per un'entrata in ritardo e/o un'uscita anticipata, rispetto al turno.
+// turno = { inizio, fine, pausaInizio, pausaFine } come "HH:MM" (pausa facoltativa):
+// la pausa non conta, quindi uscire alle 13:00 con pausa 13-14 e fine 18:30 = 4,5 ore.
+function oreDaOrari({ entrata, uscita }, turno) {
+  const inizio = minutiDaOrario(turno.inizio);
+  const fine = minutiDaOrario(turno.fine);
+  if (inizio === null || fine === null || fine <= inizio) throw new ErroreValidazione('Orario di lavoro non valido nelle impostazioni.');
+  const pi = minutiDaOrario(turno.pausaInizio);
+  const pf = minutiDaOrario(turno.pausaFine);
+  const lavorato = (a, b) => {
+    if (b <= a) return 0;
+    const sovrapposizione = pi !== null && pf !== null ? Math.max(0, Math.min(b, pf) - Math.max(a, pi)) : 0;
+    return (b - a) - sovrapposizione;
+  };
+  const e = entrata ? minutiDaOrario(entrata) : inizio;
+  const u = uscita ? minutiDaOrario(uscita) : fine;
+  if (e === null) throw new ErroreValidazione('Orario di entrata non valido.');
+  if (u === null) throw new ErroreValidazione('Orario di uscita non valido.');
+  if (u <= e) throw new ErroreValidazione('L\'uscita deve essere dopo l\'entrata.');
+  const previsto = lavorato(inizio, fine);
+  const effettivo = lavorato(Math.max(inizio, e), Math.min(fine, u));
+  return arrotonda2((previsto - effettivo) / 60);
+}
+
+// --- Previsione ---
+
+// Residui se nel mese i si prendessero altre oreF/oreP (simulazione, niente viene salvato)
+function simulaPrevisione(dati, i, oreF, oreP) {
+  const mat = dati.mesi.map(m => ({ f: m.matF, p: m.matP }));
+  const god = dati.mesi.map((m, k) => ({ f: m.godF + (k === i ? oreF : 0), p: m.godP + (k === i ? oreP : 0) }));
+  const mesi = calcolaResidui(dati.apFerie, dati.apPermessi, mat, god);
+  let minimo = { valore: mesi[i].totale, i };
+  for (let k = i; k < 12; k++) if (mesi[k].totale < minimo.valore) minimo = { valore: mesi[k].totale, i: k };
+  return { mesi, finale: mesi[11].totale, minimo };
+}
+
+// Riepilogo per la card Previsione. oggiISO = "AAAA-MM-GG".
+// Le giornate con data dopo oggi sono "pianificate" (già nei totali dei mesi futuri).
+function riepilogoPrevisione(dati, giornate, oggiISO) {
+  const oggi = meseDaData(oggiISO);
+  const annoDati = parseInt(dati.anno, 10);
+  let iCorrente = null;
+  if (oggi && oggi.anno === annoDati) iCorrente = oggi.i;
+  else if (oggi && oggi.anno > annoDati) iCorrente = 11;
+  const pianificate = { f: 0, p: 0, giorni: 0 };
+  (giornate || []).forEach(g => {
+    if (!g.riporto && g.data > oggiISO) {
+      pianificate.f += parseFloat(g.ferie_ore) || 0;
+      pianificate.p += parseFloat(g.permessi_ore) || 0;
+      pianificate.giorni++;
+    }
+  });
+  return {
+    iCorrente,
+    residuoOggi: iCorrente === null ? null : dati.mesi[iCorrente].totale,
+    residuoFinale: dati.mesi[11].totale,
+    pianificate
+  };
+}
+
+// --- Export CSV delle giornate (Excel italiano: ";" e virgola decimale) ---
+function csvGiornate(giornate, oggiISO, formato) {
+  const cella = (v) => {
+    let s = String(v === null || v === undefined ? '' : v);
+    // Niente formule eseguite all'apertura in Excel (CSV injection)
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const ore = (n) => formato === 'hhmm' ? formattaOre(n, 'hhmm') : fmtIT(n);
+  const righe = [['Data', 'Ferie (ore)', 'Permessi (ore)', 'Nota', 'Tipo'].join(';')];
+  [...(giornate || [])].sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0)).forEach(g => {
+    const tipo = g.riporto ? 'Riporto' : (g.data > oggiISO ? 'Pianificata' : 'Goduta');
+    righe.push([
+      g.data.split('-').reverse().join('/'),
+      ore(parseFloat(g.ferie_ore) || 0),
+      ore(parseFloat(g.permessi_ore) || 0),
+      cella(g.nota || ''),
+      tipo
+    ].join(';'));
+  });
+  return righe.join('\r\n') + '\r\n';
+}
+
 // Classifica un errore (di Supabase, di rete o di validazione) per decidere cosa dire all'utente.
 // tipi: validazione | rete | sessione | permesso | tabella-mancante | altro
 function classificaErrore(e) {
@@ -225,6 +342,7 @@ if (typeof module !== 'undefined' && module.exports) {
     arrotonda2, parseIT, fmtIT, parseCSV,
     calcolaResidui, costruisciAnno, suggerimentoAP, sommaMesi,
     ErroreValidazione, parseOre, pianificaSalvataggio, classificaErrore,
-    MAX_ORE_GIORNO, NOTA_RIPORTO, meseDaData, limitiMese, giornateDelMese, pianificaGiornata
+    MAX_ORE_GIORNO, NOTA_RIPORTO, meseDaData, limitiMese, giornateDelMese, pianificaGiornata,
+    formattaOre, oreInCampo, minutiDaOrario, oreDaOrari, simulaPrevisione, riepilogoPrevisione, csvGiornate
   };
 }

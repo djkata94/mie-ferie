@@ -25,6 +25,19 @@ let anni = [];
 let currentAnno = null;
 let ultimiDati = null;
 
+// Impostazioni personali (tabella ferie_impostazioni): orario di lavoro e formato delle ore
+const IMPOSTAZIONI_TABLE = 'ferie_impostazioni';
+const IMPOSTAZIONI_PREDEFINITE = { inizio: '09:00', fine: '18:30', pausaInizio: '', pausaFine: '', formato: 'decimale' };
+let impostazioni = { ...IMPOSTAZIONI_PREDEFINITE };
+
+// Ore da mostrare nel formato scelto (7,50h oppure 7:30)
+const ore = (n, unita = true) => formattaOre(n, impostazioni.formato, unita);
+
+function oggiISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 const $ = (id) => document.getElementById(id);
 const selAnno = $('selAnno');
 const apBar = $('apBar');
@@ -143,8 +156,11 @@ async function calcolaAnno(anno) {
   const [datiDi, giornate] = await Promise.all([caricaTuttiIDati(), caricaGiornate(anno)]);
   const dati = datiDi(anno);
   const annoPrev = String(parseInt(anno, 10) - 1);
-  const sugg = !dati.apConfigurato && anni.includes(annoPrev) ? suggerimentoAP(datiDi(annoPrev)) : { ferie: 0, permessi: 0 };
-  return { ...dati, suggerimentoF: sugg.ferie, suggerimentoP: sugg.permessi, giornate };
+  const prev = datiDi(annoPrev);
+  const sugg = !dati.apConfigurato && anni.includes(annoPrev) ? suggerimentoAP(prev) : { ferie: 0, permessi: 0 };
+  // Per proporre la maturazione di un anno nuovo: quella di dicembre dell'anno prima
+  const maturazionePrecedente = prev.maturazioneCaricata ? { f: prev.mesi[11].matF, p: prev.mesi[11].matP } : null;
+  return { ...dati, suggerimentoF: sugg.ferie, suggerimentoP: sugg.permessi, giornate, maturazionePrecedente };
 }
 
 async function caricaAnniDaSupabase() {
@@ -159,7 +175,7 @@ async function caricaAnniDaSupabase() {
 function rigaAP(dati) {
   const tr = document.createElement('tr');
   tr.className = 'row-ap';
-  const v = (n) => dati.apConfigurato ? `${fmtIT(n)}h` : '-';
+  const v = (n) => dati.apConfigurato ? `${ore(n)}` : '-';
   tr.innerHTML = `
     <td data-label="AP">AP (Anno Prec.)</td>
     <td class="god-val" data-label="Godute">- / -</td>
@@ -177,7 +193,7 @@ function render(dati) {
   if (!dati.maturazioneCaricata) {
     const trInfo = document.createElement('tr');
     trInfo.className = 'row-info';
-    trInfo.innerHTML = `<td colspan="5" class="info-msg">⚠ Nessuna maturazione caricata per ${dati.anno}: importala con 📁.</td>`;
+    trInfo.innerHTML = `<td colspan="5" class="info-msg">⚠ Nessuna maturazione per il ${dati.anno}: impostala con 📁.</td>`;
     gridBody.appendChild(trInfo);
   }
 
@@ -198,10 +214,10 @@ function render(dati) {
     });
     tr.innerHTML = `
       <td data-label="Mese">${m.nome}</td>
-      <td class="god-val" data-label="Godute (F/P)">${fmtIT(m.godF)} / ${fmtIT(m.godP)}</td>
-      <td class="res-val" data-label="Resid. Ferie">${fmtIT(m.resF)}h</td>
-      <td class="res-val" data-label="Resid. Permessi">${fmtIT(m.resP)}h</td>
-      <td class="tot-val" data-label="Totale">${fmtIT(m.totale)}h</td>
+      <td class="god-val" data-label="Godute (F/P)">${ore(m.godF, false)} / ${ore(m.godP, false)}</td>
+      <td class="res-val" data-label="Resid. Ferie">${ore(m.resF)}</td>
+      <td class="res-val" data-label="Resid. Permessi">${ore(m.resP)}</td>
+      <td class="tot-val" data-label="Totale">${ore(m.totale)}</td>
     `;
     gridBody.appendChild(tr);
   });
@@ -210,12 +226,13 @@ function render(dati) {
   const soglia = $('sogliaAlert');
   const ultimo = dati.mesi[11];
   if (ultimo.totale < 20) {
-    soglia.textContent = `⚠ Attenzione: residuo totale di ${fmtIT(ultimo.totale)}h (inferiore a 20h).`;
+    soglia.textContent = `⚠ Attenzione: residuo totale di ${ore(ultimo.totale)} (inferiore a 20h).`;
     soglia.style.display = 'block';
   } else {
     soglia.style.display = 'none';
   }
 
+  renderPrevisione();
   precompilaMese();
 }
 
@@ -223,10 +240,67 @@ function render(dati) {
 function precompilaMese() {
   const i = MESI.indexOf(mese.value);
   const m = ultimiDati && i >= 0 ? ultimiDati.mesi[i] : null;
-  ferie.value = m ? m.godF : '';
-  permessi.value = m ? m.godP : '';
+  ferie.value = m ? oreInCampo(m.godF, impostazioni.formato) : '';
+  permessi.value = m ? oreInCampo(m.godP, impostazioni.formato) : '';
   renderGiornate();
 }
+
+// ---------------------------------------------------------------------------
+// Previsione: residuo di oggi, di fine anno, giornate pianificate e simulazione
+// ---------------------------------------------------------------------------
+
+const previsioneCard = $('previsioneCard');
+const simMese = $('simMese');
+const simFerie = $('simFerie');
+const simPermessi = $('simPermessi');
+const simEsito = $('simEsito');
+
+function renderPrevisione() {
+  if (!ultimiDati) { previsioneCard.style.display = 'none'; return; }
+  previsioneCard.style.display = 'block';
+  const r = riepilogoPrevisione(ultimiDati, ultimiDati.giornate, oggiISO());
+  const pezzi = [];
+  if (r.residuoOggi !== null) pezzi.push(`oggi (${MESI_LABEL[r.iCorrente]}) <b class="${r.residuoOggi < 0 ? 'neg' : ''}">${ore(r.residuoOggi)}</b>`);
+  pezzi.push(`fine anno <b class="${r.residuoFinale < 20 ? 'neg' : ''}">${ore(r.residuoFinale)}</b>`);
+  $('previsioneAnno').textContent = ultimiDati.anno;
+  $('previsioneSintesi').innerHTML = pezzi.join(' · ');
+  const p = r.pianificate;
+  $('previsionePianificate').textContent = p.giorni === 0
+    ? 'Nessuna giornata pianificata dopo oggi.'
+    : `Già conteggiate: ${p.giorni === 1 ? '1 giornata pianificata' : `${p.giorni} giornate pianificate`} dopo oggi (ferie ${ore(p.f)}, permessi ${ore(p.p)}).`;
+  // Mese della simulazione: di default il mese corrente (o gennaio per un anno futuro)
+  if (!simMese.dataset.toccato) simMese.value = MESI[r.iCorrente === null ? 0 : r.iCorrente];
+  simEsito.innerHTML = '';
+}
+
+simMese.addEventListener('change', () => { simMese.dataset.toccato = '1'; });
+
+$('simulaForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!ultimiDati) return;
+  const i = MESI.indexOf(simMese.value);
+  let f, p;
+  try {
+    f = parseOre(simFerie.value, 'Ferie') || 0;
+    p = parseOre(simPermessi.value, 'Permessi') || 0;
+    if (f === 0 && p === 0) throw new ErroreValidazione('Inserisci le ore da simulare.');
+  } catch (err) {
+    simEsito.innerHTML = '';
+    segnalaErrore(err, 'Simulazione', simEsito);
+    return;
+  }
+  const sim = simulaPrevisione(ultimiDati, i, f, p);
+  const cosa = [f ? `${ore(f)} di ferie` : '', p ? `${ore(p)} di permessi` : ''].filter(Boolean).join(' e ');
+  const classe = (n) => n < 0 ? 'neg' : (n < 20 ? 'warn' : 'ok');
+  simEsito.innerHTML = `
+    <p>Con ${cosa} in ${MESI_LABEL[i]}:</p>
+    <ul>
+      <li>residuo di ${MESI_LABEL[i]}: <b class="${classe(sim.mesi[i].totale)}">${ore(sim.mesi[i].totale)}</b></li>
+      <li>punto più basso da lì in poi: <b class="${classe(sim.minimo.valore)}">${ore(sim.minimo.valore)}</b> (${MESI_LABEL[sim.minimo.i]})</li>
+      <li>fine anno: <b class="${classe(sim.finale)}">${ore(sim.finale)}</b> (oggi previsto ${ore(ultimiDati.mesi[11].totale)})</li>
+    </ul>
+    <p class="sim-nota">${sim.minimo.valore < 0 ? '⚠ In quel periodo andresti sotto zero.' : (sim.finale < 20 ? '⚠ A fine anno resteresti sotto le 20 ore.' : 'Ok: resti sopra le 20 ore.')} È solo una simulazione, niente viene salvato.</p>`;
+});
 mese.addEventListener('change', precompilaMese);
 
 // ---------------------------------------------------------------------------
@@ -293,7 +367,7 @@ function renderGiornate() {
   const giornate = giornateMeseSelezionato();
   aggiornaBloccoMese(giornate.length > 0);
   const m = ultimiDati.mesi[i];
-  $('giornateTotale').textContent = `Totale mese: F ${fmtIT(m.godF)}h · P ${fmtIT(m.godP)}h`;
+  $('giornateTotale').textContent = `Totale mese: F ${ore(m.godF)} · P ${ore(m.godP)}`;
   const nGiorni = giornate.filter(g => !g.riporto).length;
   $('giornateConteggio').textContent = nGiorni === 0 ? '' : (nGiorni === 1 ? '1 giornata' : `${nGiorni} giornate`);
 
@@ -301,10 +375,10 @@ function renderGiornate() {
   giornataData.min = min;
   giornataData.max = max;
   if (!giornataData.value || giornataData.value < min || giornataData.value > max) {
-    const oggi = new Date();
-    const oggiISO = `${oggi.getFullYear()}-${String(oggi.getMonth() + 1).padStart(2, '0')}-${String(oggi.getDate()).padStart(2, '0')}`;
-    giornataData.value = oggiISO >= min && oggiISO <= max ? oggiISO : min;
+    const oggi = oggiISO();
+    giornataData.value = oggi >= min && oggi <= max ? oggi : min;
   }
+  aggiornaSuggerimentoTurno();
 
   if (giornate.length === 0) {
     lista.innerHTML = (m.godF > 0 || m.godP > 0)
@@ -320,13 +394,16 @@ function renderGiornate() {
       <tbody></tbody>
     </table>`;
   const tbody = lista.querySelector('tbody');
+  const oggi = oggiISO();
   giornate.forEach(g => {
     const tr = document.createElement('tr');
+    const pianificata = !g.riporto && g.data > oggi;
     if (g.riporto) tr.className = 'riporto';
+    else if (pianificata) tr.className = 'pianificata';
     tr.innerHTML = `
-      <td>${g.riporto ? 'Riporto' : dataIT(g.data)}</td>
-      <td class="num">${fmtIT(parseFloat(g.ferie_ore))}</td>
-      <td class="num">${fmtIT(parseFloat(g.permessi_ore))}</td>
+      <td>${g.riporto ? 'Riporto' : dataIT(g.data)}${pianificata ? ' <span class="tag-pianificata">pianificata</span>' : ''}</td>
+      <td class="num">${ore(parseFloat(g.ferie_ore), false)}</td>
+      <td class="num">${ore(parseFloat(g.permessi_ore), false)}</td>
       <td class="nota"></td>
       <td class="elimina"><button type="button" title="Elimina">✕</button></td>`;
     tr.querySelector('.nota').textContent = g.nota || ''; // testo libero: mai come HTML
@@ -343,7 +420,6 @@ giornataForm.addEventListener('submit', async (e) => {
 
   let piano;
   try {
-    if (giornataFerie.validity.badInput || giornataPermessi.validity.badInput) throw new ErroreValidazione('Ore non valide.');
     const m = ultimiDati.mesi[i];
     piano = pianificaGiornata(
       { data: giornataData.value, ferie: giornataFerie.value, permessi: giornataPermessi.value, nota: giornataNota.value },
@@ -355,7 +431,7 @@ giornataForm.addEventListener('submit', async (e) => {
   }
   if (piano.riporto) {
     const r = piano.riporto;
-    const ok = confirm(`${MESI_LABEL[i]} ha già un totale senza dettaglio (ferie ${fmtIT(r.ferie_ore)}, permessi ${fmtIT(r.permessi_ore)}).\n\n` +
+    const ok = confirm(`${MESI_LABEL[i]} ha già un totale senza dettaglio (ferie ${ore(r.ferie_ore)}, permessi ${ore(r.permessi_ore)}).\n\n` +
       `Lo tengo come voce di riporto e aggiungo la giornata?`);
     if (!ok) return;
   }
@@ -368,6 +444,8 @@ giornataForm.addEventListener('submit', async (e) => {
     giornataFerie.value = '';
     giornataPermessi.value = '';
     giornataNota.value = '';
+    giornataEntrata.value = '';
+    giornataUscita.value = '';
     if (await caricaGriglia()) show(`Giornata del ${giornataData.value.split('-').reverse().join('/')} aggiunta.`, 'ok');
   } catch (err) {
     segnalaErrore(err, 'Aggiunta giornata', giornateMsg);
@@ -376,9 +454,70 @@ giornataForm.addEventListener('submit', async (e) => {
   }
 });
 
+// --- Permesso dagli orari e pulsanti rapidi ---
+const giornataEntrata = $('giornataEntrata');
+const giornataUscita = $('giornataUscita');
+const turnoInfo = $('turnoInfo');
+
+function turnoCorrente() {
+  return { inizio: impostazioni.inizio, fine: impostazioni.fine, pausaInizio: impostazioni.pausaInizio, pausaFine: impostazioni.pausaFine };
+}
+
+function aggiornaSuggerimentoTurno() {
+  const pausa = impostazioni.pausaInizio ? `, pausa ${impostazioni.pausaInizio}–${impostazioni.pausaFine}` : '';
+  turnoInfo.textContent = `Turno ${impostazioni.inizio}–${impostazioni.fine}${pausa} (⏱ per cambiarlo)`;
+}
+
+// Entrata o uscita cambiata: calcola i permessi e propone una nota se è vuota
+function calcolaDaOrari() {
+  giornateMsg.textContent = '';
+  if (!giornataEntrata.value && !giornataUscita.value) return;
+  try {
+    const h = oreDaOrari({ entrata: giornataEntrata.value, uscita: giornataUscita.value }, turnoCorrente());
+    giornataPermessi.value = h > 0 ? oreInCampo(h, impostazioni.formato) : '';
+    if (!giornataNota.value.trim() || giornataNota.dataset.auto === '1') {
+      const parti = [];
+      if (giornataEntrata.value) parti.push(`entrato ${giornataEntrata.value}`);
+      if (giornataUscita.value) parti.push(`uscito ${giornataUscita.value}`);
+      giornataNota.value = parti.join(', ');
+      giornataNota.dataset.auto = '1';
+    }
+    if (h === 0) giornateMsg.textContent = 'Nessun permesso: l\'orario è dentro il turno.';
+  } catch (err) {
+    segnalaErrore(err, 'Calcolo orari', giornateMsg);
+  }
+}
+giornataEntrata.addEventListener('change', calcolaDaOrari);
+giornataUscita.addEventListener('change', calcolaDaOrari);
+giornataNota.addEventListener('input', () => { delete giornataNota.dataset.auto; });
+
+// +15 / +30 / +45 / +60 minuti di permesso
+document.querySelectorAll('.btn-rapido').forEach(b => b.addEventListener('click', () => {
+  let attuale = 0;
+  try { attuale = parseOre(giornataPermessi.value, 'Permessi') || 0; } catch (e) { attuale = 0; }
+  giornataPermessi.value = oreInCampo(arrotonda2(attuale + parseInt(b.dataset.minuti, 10) / 60), impostazioni.formato);
+}));
+
+// Export CSV di tutte le giornate dell'anno a video
+$('btnEsportaGiornate').addEventListener('click', () => {
+  if (!ultimiDati || !ultimiDati.giornate) return;
+  if (ultimiDati.giornate.length === 0) { giornateMsg.textContent = `Nessuna giornata nel ${ultimiDati.anno} da esportare.`; return; }
+  // BOM: così Excel riconosce l'UTF-8 (accenti nelle note)
+  const blob = new Blob(['﻿' + csvGiornate(ultimiDati.giornate, oggiISO(), impostazioni.formato)], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `mie-ferie-giornate-${ultimiDati.anno}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  show(`Esportate ${ultimiDati.giornate.length} giornate del ${ultimiDati.anno}.`, 'ok');
+});
+
 async function eliminaGiornata(g) {
   const cosa = g.riporto ? 'la voce di riporto' : `la giornata del ${g.data.split('-').reverse().join('/')}`;
-  if (!confirm(`Elimino ${cosa} (ferie ${fmtIT(parseFloat(g.ferie_ore))}, permessi ${fmtIT(parseFloat(g.permessi_ore))})?`)) return;
+  if (!confirm(`Elimino ${cosa} (ferie ${ore(parseFloat(g.ferie_ore))}, permessi ${ore(parseFloat(g.permessi_ore))})?`)) return;
   try {
     await query('Eliminazione giornata', sb.from(GIORNATE_TABLE).delete().eq('id', g.id));
     if (await caricaGriglia()) show('Giornata eliminata.', 'ok');
@@ -395,6 +534,7 @@ function svuotaGriglia(messaggio) {
   gridBody.innerHTML = messaggio
     ? `<tr class="row-info"><td colspan="5" class="info-msg">${messaggio}</td></tr>`
     : '';
+  renderPrevisione();
   precompilaMese();
 }
 
@@ -466,7 +606,7 @@ async function inviaDati() {
     return;
   }
   if (piano.sovrascritti.length > 0) {
-    const righe = piano.sovrascritti.map(c => `${c.nome} di ${MESI_LABEL[i]}: ${fmtIT(c.da)} → ${fmtIT(c.a)}`).join('\n');
+    const righe = piano.sovrascritti.map(c => `${c.nome} di ${MESI_LABEL[i]}: ${ore(c.da)} → ${ore(c.a)}`).join('\n');
     if (!confirm(`Modifico i valori già salvati?\n\n${righe}`)) return;
   }
 
@@ -651,8 +791,135 @@ async function rimuoviAnnoDaUI(anno) {
 function apriPopupMaturation() {
   maturationFileInput.value = '';
   maturationMsg.textContent = '';
+  // Ore al mese precompilate: quelle dell'anno a video (gennaio) o, se mancano, dell'anno precedente
+  const anno = currentAnno;
+  $('maturazioneAnno').textContent = anno || '';
+  $('maturazioneAnnoBtn').textContent = anno || '';
+  let f = '', p = '';
+  if (ultimiDati && ultimiDati.maturazioneCaricata) {
+    f = ultimiDati.mesi[0].matF; p = ultimiDati.mesi[0].matP;
+  } else if (ultimiDati && ultimiDati.maturazionePrecedente) {
+    f = ultimiDati.maturazionePrecedente.f; p = ultimiDati.maturazionePrecedente.p;
+  }
+  $('maturazioneFerie').value = f === '' ? '' : oreInCampo(f, 'decimale');
+  $('maturazionePermessi').value = p === '' ? '' : oreInCampo(p, 'decimale');
   popupMaturation.style.display = 'flex';
 }
+
+// Stesse ore maturate in tutti i 12 mesi dell'anno a video (niente più CSV per gli anni nuovi)
+$('maturazioneForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const anno = currentAnno;
+  if (!anno) return;
+  maturationMsg.textContent = '';
+  let f, p;
+  try {
+    f = parseOre($('maturazioneFerie').value, 'Ferie al mese');
+    p = parseOre($('maturazionePermessi').value, 'Permessi al mese');
+    if (f === null || p === null) throw new ErroreValidazione('Inserisci le ore di ferie e di permessi maturate al mese.');
+    if (f > 40 || p > 40) throw new ErroreValidazione('Più di 40 ore maturate al mese? Controlla i valori.');
+  } catch (err) {
+    segnalaErrore(err, 'Maturazione', maturationMsg);
+    return;
+  }
+  // Se l'anno ha già una maturazione diversa (es. mesi diversi dal CSV) chiede conferma
+  if (ultimiDati && ultimiDati.anno === String(anno) && ultimiDati.maturazioneCaricata) {
+    const diverso = ultimiDati.mesi.some(m => m.matF !== f || m.matP !== p);
+    if (diverso && !confirm(`Il ${anno} ha già una maturazione. La sostituisco con ${fmtIT(f)} ore di ferie e ${fmtIT(p)} di permessi in ogni mese?`)) return;
+  }
+  const btn = $('btnSalvaMaturazione');
+  btn.disabled = true;
+  try {
+    const adesso = new Date().toISOString();
+    await query(`Maturazione ${anno}`, sb.from(MATURAZIONE_TABLE).upsert(
+      MESI.map(m => ({ anno: parseInt(anno, 10), mese: m, ferie_maturata: f, permessi_maturati: p, updated_at: adesso })),
+      { onConflict: 'anno,mese' }));
+    chiudiPopupMaturation();
+    if (await caricaGriglia()) show(`Maturazione del ${anno} salvata.`, 'ok');
+  } catch (err) {
+    segnalaErrore(err, `Maturazione ${anno}`, maturationMsg);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Impostazioni: orario di lavoro e formato ore
+// ---------------------------------------------------------------------------
+
+const popupImpostazioni = $('popupImpostazioni');
+const impMsg = $('impMsg');
+
+async function caricaImpostazioni() {
+  try {
+    const r = await query('Lettura impostazioni', sb.from(IMPOSTAZIONI_TABLE)
+      .select('inizio_turno, fine_turno, pausa_inizio, pausa_fine, formato_ore').maybeSingle());
+    const hhmm = (t) => t ? String(t).slice(0, 5) : '';
+    impostazioni = r ? {
+      inizio: hhmm(r.inizio_turno), fine: hhmm(r.fine_turno),
+      pausaInizio: hhmm(r.pausa_inizio), pausaFine: hhmm(r.pausa_fine),
+      formato: r.formato_ore === 'hhmm' ? 'hhmm' : 'decimale'
+    } : { ...IMPOSTAZIONI_PREDEFINITE };
+  } catch (e) {
+    // Senza impostazioni il sito funziona con i valori predefiniti: lo segnalo solo in console
+    if (classificaErrore(e).tipo !== 'tabella-mancante') console.error('[mie-ferie] Impostazioni non lette:', e);
+    impostazioni = { ...IMPOSTAZIONI_PREDEFINITE };
+  }
+}
+
+function apriImpostazioni() {
+  $('impInizio').value = impostazioni.inizio;
+  $('impFine').value = impostazioni.fine;
+  $('impPausaInizio').value = impostazioni.pausaInizio;
+  $('impPausaFine').value = impostazioni.pausaFine;
+  document.querySelector(`input[name="impFormato"][value="${impostazioni.formato}"]`).checked = true;
+  impMsg.textContent = '';
+  popupImpostazioni.style.display = 'flex';
+}
+
+function chiudiImpostazioni() {
+  popupImpostazioni.style.display = 'none';
+}
+
+$('btnImpostazioni').addEventListener('click', apriImpostazioni);
+$('btnAnnullaImpostazioni').addEventListener('click', chiudiImpostazioni);
+popupImpostazioni.addEventListener('click', (e) => { if (e.target === popupImpostazioni) chiudiImpostazioni(); });
+
+$('impostazioniForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const nuove = {
+    inizio: $('impInizio').value, fine: $('impFine').value,
+    pausaInizio: $('impPausaInizio').value, pausaFine: $('impPausaFine').value,
+    formato: document.querySelector('input[name="impFormato"]:checked').value
+  };
+  try {
+    if (!nuove.inizio || !nuove.fine || nuove.fine <= nuove.inizio) throw new ErroreValidazione('La fine del turno deve essere dopo l\'inizio.');
+    if (!!nuove.pausaInizio !== !!nuove.pausaFine) throw new ErroreValidazione('Indica sia l\'inizio sia la fine della pausa (oppure nessuno dei due).');
+    if (nuove.pausaInizio && (nuove.pausaFine <= nuove.pausaInizio || nuove.pausaInizio < nuove.inizio || nuove.pausaFine > nuove.fine)) {
+      throw new ErroreValidazione('La pausa deve stare dentro il turno.');
+    }
+  } catch (err) {
+    segnalaErrore(err, 'Impostazioni', impMsg);
+    return;
+  }
+  const btn = $('btnSalvaImpostazioni');
+  btn.disabled = true;
+  try {
+    await query('Salvataggio impostazioni', sb.from(IMPOSTAZIONI_TABLE).upsert({
+      inizio_turno: nuove.inizio, fine_turno: nuove.fine,
+      pausa_inizio: nuove.pausaInizio || null, pausa_fine: nuove.pausaFine || null,
+      formato_ore: nuove.formato, updated_at: new Date().toISOString()
+    }, { onConflict: 'utente' }));
+    impostazioni = nuove;
+    chiudiImpostazioni();
+    if (ultimiDati) render(ultimiDati); // ridisegna tutto nel nuovo formato
+    show('Impostazioni salvate.', 'ok');
+  } catch (err) {
+    segnalaErrore(err, 'Salvataggio impostazioni', impMsg);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 function chiudiPopupMaturation() {
   maturationMsg.textContent = '';
@@ -762,18 +1029,18 @@ async function caricaReport() {
     <div class="report-cards">
       <div class="report-card">
         <span class="report-card-label">Maturato totale</span>
-        <span class="report-card-val">${fmtIT(tSel.matF + tSel.matP)}h</span>
-        <span class="report-card-sub">F ${fmtIT(tSel.matF)}h · P ${fmtIT(tSel.matP)}h</span>
+        <span class="report-card-val">${ore(tSel.matF + tSel.matP)}</span>
+        <span class="report-card-sub">F ${ore(tSel.matF)} · P ${ore(tSel.matP)}</span>
       </div>
       <div class="report-card">
         <span class="report-card-label">Goduti totale</span>
-        <span class="report-card-val">${fmtIT(tSel.godF + tSel.godP)}h</span>
-        <span class="report-card-sub">F ${fmtIT(tSel.godF)}h · P ${fmtIT(tSel.godP)}h</span>
+        <span class="report-card-val">${ore(tSel.godF + tSel.godP)}</span>
+        <span class="report-card-sub">F ${ore(tSel.godF)} · P ${ore(tSel.godP)}</span>
       </div>
       <div class="report-card ${tSel.residuoFinale < 20 ? 'report-card-warn' : ''}">
         <span class="report-card-label">Residuo finale</span>
-        <span class="report-card-val">${fmtIT(tSel.residuoFinale)}h</span>
-        <span class="report-card-sub">AP ${fmtIT(tSel.apTot)}h</span>
+        <span class="report-card-val">${ore(tSel.residuoFinale)}</span>
+        <span class="report-card-sub">AP ${ore(tSel.apTot)}</span>
       </div>
     </div>
   `;
@@ -788,10 +1055,10 @@ async function caricaReport() {
         ${righe.map(r => `
           <tr class="${r.selezionato ? 'report-row-sel' : ''}">
             <td data-label="Anno">${r.anno}</td>
-            <td data-label="Maturato">${fmtIT(r.t.matF + r.t.matP)}h</td>
-            <td data-label="Goduti">${fmtIT(r.t.godF + r.t.godP)}h</td>
-            <td data-label="AP">${fmtIT(r.t.apTot)}h</td>
-            <td data-label="Residuo" class="${r.t.residuoFinale < 20 ? 'report-res-warn' : ''}">${fmtIT(r.t.residuoFinale)}h</td>
+            <td data-label="Maturato">${ore(r.t.matF + r.t.matP)}</td>
+            <td data-label="Goduti">${ore(r.t.godF + r.t.godP)}</td>
+            <td data-label="AP">${ore(r.t.apTot)}</td>
+            <td data-label="Residuo" class="${r.t.residuoFinale < 20 ? 'report-res-warn' : ''}">${ore(r.t.residuoFinale)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -839,8 +1106,8 @@ async function caricaStorico(anno) {
     box.innerHTML = `<p class="info-msg">Nessuna modifica registrata per il ${anno}.</p>`;
     return;
   }
-  const ore = (n) => n === null || n === undefined ? '—' : fmtIT(parseFloat(n));
-  const cambio = (prima, dopo) => prima === dopo ? ore(dopo) : `${ore(prima)} → ${ore(dopo)}`;
+  const oreStorico = (n) => n === null || n === undefined ? '—' : ore(parseFloat(n), false);
+  const cambio = (prima, dopo) => prima === dopo ? oreStorico(dopo) : `${oreStorico(prima)} → ${oreStorico(dopo)}`;
   const nomeOp = { INSERT: 'Nuovo', UPDATE: 'Modifica', DELETE: 'Cancellato' };
   const quando = (t) => new Date(t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   box.innerHTML = `
@@ -873,9 +1140,9 @@ $('btnStorico').addEventListener('click', apriStorico);
 $('btnChiudiStorico').addEventListener('click', chiudiStorico);
 
 async function loadAnni() {
-  // Gli anni stanno solo nella tabella "anni"
+  // Gli anni stanno solo nella tabella "anni"; le impostazioni servono prima di disegnare
   try {
-    anni = await caricaAnniDaSupabase();
+    [anni] = await Promise.all([caricaAnniDaSupabase(), caricaImpostazioni()]);
   } catch (e) {
     svuotaGriglia('Dati non disponibili: riprova ricaricando la pagina.');
     segnalaErrore(e, 'Caricamento degli anni');

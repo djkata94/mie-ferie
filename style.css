@@ -498,12 +498,87 @@ tr.row-mese { cursor: pointer; }
 .giornate-table .elimina { width: 1%; text-align: right; }
 .giornate-table .elimina button { padding: 4px 10px; background: none; border: 1px solid rgba(238,231,216,0.25); color: #eee7d6; font-size: 0.75rem; }
 .giornate-table .elimina button:hover { border-color: var(--err); color: var(--err); box-shadow: none; }
-.giornata-form { display: grid; grid-template-columns: 1.2fr 0.8fr 0.8fr 2fr auto; gap: 12px; align-items: end; }
+/* Form giornata: data e orari, poi ore, pulsanti rapidi, nota e Aggiungi */
+.giornata-form {
+  display: grid; gap: 10px 12px; align-items: end;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-areas:
+    "data entrata uscita"
+    "info info info"
+    "ferie permessi rapidi"
+    "nota nota azione";
+}
+.g-data { grid-area: data; } .g-entrata { grid-area: entrata; } .g-uscita { grid-area: uscita; }
+.g-info { grid-area: info; } .g-ferie { grid-area: ferie; } .g-permessi { grid-area: permessi; }
+.g-rapidi { grid-area: rapidi; display: flex; gap: 6px; flex-wrap: wrap; }
+.g-nota { grid-area: nota; } .g-azione { grid-area: azione; }
+.turno-info { margin: -4px 0 4px; font-size: 0.72rem; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+.btn-rapido {
+  flex: 1 1 0; padding: 10px 6px; min-width: 52px; background: none; color: var(--brass);
+  border: 1px solid rgba(201,154,74,0.45); font-size: 0.75rem; letter-spacing: 0.02em; text-transform: none;
+}
+.btn-rapido:hover { background: rgba(201,154,74,0.12); box-shadow: none; }
+.btn-secondario {
+  background: none; color: #eee7d6; border: 1px solid rgba(238,231,216,0.25);
+  padding: 8px 14px; font-size: 0.72rem;
+}
+.btn-secondario:hover { border-color: var(--brass); color: var(--brass); box-shadow: none; }
+.giornate-azioni { display: flex; justify-content: flex-end; margin-top: 14px; }
+.giornate-table .pianificata td { color: #a9c49a; }
+.tag-pianificata {
+  font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; color: #8faa7f;
+  border: 1px solid rgba(143,170,127,0.5); border-radius: 999px; padding: 1px 6px; margin-left: 6px;
+  font-family: 'IBM Plex Mono', monospace; white-space: nowrap;
+}
+
+/* Previsione */
+.previsione-card { margin: 0 0 22px 0; }
+.previsione-card::before { content: "PREVISIONE"; }
+.previsione-sintesi { font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: var(--muted); }
+.previsione-sintesi b, .sim-esito b { color: #eee7d6; font-weight: 600; }
+.previsione-sintesi b.neg, .sim-esito b.neg { color: var(--err); }
+.sim-esito b.warn { color: #e0b25a; }
+.sim-esito b.ok { color: var(--ok); }
+.previsione-pianificate { margin: 0 0 14px; font-size: 0.85rem; color: var(--muted); }
+.simula-form { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 10px 12px; align-items: end; }
+.simula-titolo { grid-column: 1 / -1; margin: 0; font-family: 'Fraunces', serif; color: var(--brass); font-size: 1rem; }
+.sim-esito { margin-top: 12px; font-size: 0.88rem; }
+.sim-esito p { margin: 0 0 6px; }
+.sim-esito ul { margin: 0 0 8px; padding-left: 18px; }
+.sim-esito li { margin: 2px 0; }
+.sim-esito .sim-nota { color: var(--muted); font-size: 0.8rem; }
+.sim-esito:empty { display: none; }
+
+/* Popup: separatore, impostazioni */
+.popup-sep { border: none; border-top: 1px solid rgba(238,231,216,0.12); margin: 18px 0 14px; }
+.imp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.imp-formato { border: 1px solid rgba(238,231,216,0.12); border-radius: 6px; padding: 10px 12px; margin: 4px 0 14px; }
+.imp-formato legend { padding: 0 6px; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: var(--brass); text-transform: uppercase; letter-spacing: 0.1em; }
+.popup-content .imp-formato label.radio {
+  display: flex; align-items: center; gap: 8px; margin: 6px 0; cursor: pointer;
+  text-transform: none; letter-spacing: 0; font-family: 'IBM Plex Sans', sans-serif; font-size: 0.9rem; color: #eee7d6;
+}
+.popup-content .imp-formato input[type="radio"] { width: auto; margin: 0; accent-color: #c99a4a; }
+#popupImpostazioni .popup-content, #popupMaturation .popup-content { width: min(420px, calc(100vw - 32px)); min-width: 0; box-sizing: border-box; }
 .giornate-msg { margin: 10px 0 0 0; min-height: 1em; font-size: 0.8rem; color: var(--err); }
 .giornate-msg:empty { display: none; }
 @media (max-width: 700px) {
-  .giornata-form { grid-template-columns: 1fr 1fr; }
-  .giornata-form > div:first-child, .giornata-form .giornata-nota, .giornata-form button { grid-column: 1 / -1; }
+  .giornata-form {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "data data"
+      "entrata uscita"
+      "info info"
+      "ferie permessi"
+      "rapidi rapidi"
+      "nota nota"
+      "azione azione";
+  }
+  .btn-rapido { min-height: 44px; }
+  .simula-form { grid-template-columns: 1fr 1fr; }
+  .simula-form > div:first-child, .simula-form button { grid-column: 1 / -1; }
+  .giornate-azioni { justify-content: stretch; }
+  .giornate-azioni .btn-secondario { width: 100%; min-height: 44px; }
   .giornate-table thead { display: none; }
   /* Una giornata = una riga compatta: data · ferie · permessi · ✕, sotto la nota */
   .giornate-table tbody tr {
@@ -518,4 +593,4 @@ tr.row-mese { cursor: pointer; }
   .giornate-table td.nota:empty { display: none; }
   .giornate-table .elimina button { min-height: 36px; min-width: 36px; }
 }
-@media print { .giornate-card { display: none !important; } }
+@media print { .giornate-card, .previsione-card { display: none !important; } }

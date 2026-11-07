@@ -153,3 +153,80 @@ test('pianificaGiornata: validazioni', () => {
   assert.throws(() => L.pianificaGiornata({ data: '2026-03-01', ferie: '8', nota: 'x'.repeat(201) }, mese), /troppo lunga/);
   assert.throws(() => L.pianificaGiornata({ data: 'boh', ferie: '8' }, mese), /Data non valida/);
 });
+
+// --- Formato h:mm, orari, previsione, CSV ---
+
+test('parseOre accetta anche ore:minuti', () => {
+  assert.equal(L.parseOre('0:30', 'Permessi'), 0.5);
+  assert.equal(L.parseOre('1:45', 'Permessi'), 1.75);
+  assert.equal(L.parseOre('0:10', 'Permessi'), 0.17);
+  assert.throws(() => L.parseOre('1:75', 'Permessi'), /1:30 oppure 1,5/);
+  assert.throws(() => L.parseOre('1:2:3', 'Permessi'), L.ErroreValidazione);
+});
+
+test('formattaOre e oreInCampo: decimale e h:mm, anche negativi', () => {
+  assert.equal(L.formattaOre(7.5, 'decimale'), '7,50h');
+  assert.equal(L.formattaOre(7.5, 'decimale', false), '7,50');
+  assert.equal(L.formattaOre(7.5, 'hhmm'), '7:30');
+  assert.equal(L.formattaOre(0.25, 'hhmm'), '0:15');
+  assert.equal(L.formattaOre(-34.24, 'hhmm'), '-34:14');
+  assert.equal(L.formattaOre(-0.001, 'hhmm'), '0:00');
+  assert.equal(L.oreInCampo(1.75, 'decimale'), '1,75');
+  assert.equal(L.oreInCampo(1.75, 'hhmm'), '1:45');
+  // quello che finisce nel campo si rilegge uguale
+  assert.equal(L.parseOre(L.oreInCampo(6.75, 'hhmm'), 'x'), 6.75);
+  assert.equal(L.parseOre(L.oreInCampo(6.75, 'decimale'), 'x'), 6.75);
+});
+
+test('oreDaOrari: uscita anticipata, entrata in ritardo, pausa esclusa', () => {
+  const turno = { inizio: '09:00', fine: '18:30', pausaInizio: '13:00', pausaFine: '14:00' };
+  assert.equal(L.oreDaOrari({ uscita: '18:00' }, turno), 0.5);   // l'esempio di Gabriele
+  assert.equal(L.oreDaOrari({ uscita: '18:15' }, turno), 0.25);
+  assert.equal(L.oreDaOrari({ entrata: '09:30' }, turno), 0.5);
+  assert.equal(L.oreDaOrari({ entrata: '09:15', uscita: '18:00' }, turno), 0.75);
+  assert.equal(L.oreDaOrari({ uscita: '13:00' }, turno), 4.5);   // pausa non conteggiata
+  assert.equal(L.oreDaOrari({ uscita: '13:30' }, turno), 4.5);   // uscire durante la pausa
+  assert.equal(L.oreDaOrari({ entrata: '14:00' }, turno), 4);    // mattina intera
+  assert.equal(L.oreDaOrari({ uscita: '19:00' }, turno), 0);     // dopo la fine turno: niente permesso
+  assert.equal(L.oreDaOrari({ uscita: '18:00' }, { inizio: '09:00', fine: '18:30' }), 0.5); // senza pausa
+  assert.throws(() => L.oreDaOrari({ entrata: '18:00', uscita: '10:00' }, turno), /dopo l'entrata/);
+  assert.throws(() => L.oreDaOrari({ uscita: '25:00' }, turno), /uscita non valido/);
+});
+
+test('simulaPrevisione: 40h di ferie ad agosto 2026', () => {
+  const sim = L.simulaPrevisione(anno2026(), 7, 40, 0);
+  assert.equal(L.arrotonda2(sim.finale), 24.26);
+  assert.equal(sim.minimo.i, 7);
+  assert.equal(L.arrotonda2(sim.minimo.valore), -51.99);
+  // senza nulla in più la previsione coincide con la griglia
+  assert.equal(L.arrotonda2(L.simulaPrevisione(anno2026(), 0, 0, 0).finale), 64.26);
+});
+
+test('riepilogoPrevisione: mese corrente, finale e giornate pianificate', () => {
+  const giornate = [
+    { data: '2026-11-06', ferie_ore: 0, permessi_ore: 0.5 },
+    { data: '2026-12-24', ferie_ore: 8, permessi_ore: 0 },
+    { data: '2026-12-01', ferie_ore: 3, permessi_ore: 0, riporto: true }
+  ];
+  const r = L.riepilogoPrevisione(anno2026(), giornate, '2026-11-07');
+  assert.equal(r.iCorrente, 10);
+  assert.equal(L.arrotonda2(r.residuoOggi), 42.26);
+  assert.equal(L.arrotonda2(r.residuoFinale), 64.26);
+  assert.deepEqual(r.pianificate, { f: 8, p: 0, giorni: 1 });
+  assert.equal(L.riepilogoPrevisione(anno2026(), [], '2025-06-01').iCorrente, null); // anno futuro
+  assert.equal(L.riepilogoPrevisione(anno2026(), [], '2027-02-01').iCorrente, 11);   // anno passato
+});
+
+test('csvGiornate: separatore ;, virgola decimale, note protette', () => {
+  const csv = L.csvGiornate([
+    { data: '2026-11-06', ferie_ore: 0, permessi_ore: 0.5, nota: 'uscito 18:00' },
+    { data: '2026-11-01', ferie_ore: 0, permessi_ore: 7.5, nota: L.NOTA_RIPORTO, riporto: true },
+    { data: '2026-12-24', ferie_ore: 8, permessi_ore: 0, nota: '=HYPERLINK("x");"a"' }
+  ], '2026-11-07', 'decimale');
+  const righe = csv.trim().split('\r\n');
+  assert.equal(righe[0], 'Data;Ferie (ore);Permessi (ore);Nota;Tipo');
+  assert.equal(righe[1], `01/11/2026;0,00;7,50;${L.NOTA_RIPORTO};Riporto`);
+  assert.equal(righe[2], '06/11/2026;0,00;0,50;uscito 18:00;Goduta');
+  assert.equal(righe[3], '24/12/2026;8,00;0,00;"\'=HYPERLINK(""x"");""a""";Pianificata');
+  assert.match(L.csvGiornate([{ data: '2026-11-06', ferie_ore: 0, permessi_ore: 0.5 }], '2026-11-07', 'hhmm'), /0:00;0:30/);
+});
