@@ -221,6 +221,13 @@ button:disabled { background: #9a9584; cursor: not-allowed; opacity: 0.5; }
   padding: 7px 16px;
 }
 
+/* Login: finché non c'è la sessione si vede solo il riquadro di accesso */
+body.non-autenticato .container { display: none; }
+body.non-autenticato .login-overlay { display: flex; }
+.login-overlay { z-index: 100; }
+.login-overlay .popup-content { width: min(360px, calc(100vw - 32px)); min-width: 0; box-sizing: border-box; }
+.login-msg { color: #f87171 !important; font-size: 0.8rem !important; margin: 10px 0 0 0 !important; min-height: 1em; }
+
 /* Bottone icona (gestisci anni) */
 .btn-icon {
   background: none;

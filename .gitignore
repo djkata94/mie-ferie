@@ -1,0 +1,8 @@
+# Dati personali: restano solo in locale, mai nella repo né sul sito
+data/*.csv
+backup/
+*.backup.json
+mie-ferie-backup-*.json
+
+# Chiavi
+.env

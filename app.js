@@ -8,8 +8,6 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let anni = [];
 let currentAnno = null;
-let apBloccato = false;
-let apValori = { ferie: 0, permessi: 0 };
 let ultimiDati = null;
 
 const selAnno = document.getElementById('selAnno');
@@ -154,41 +152,34 @@ function parseCSV(text) {
   return rows;
 }
 
-// Leggi dati dal Supabase
+// Leggi dati da Supabase. In caso di errore lanciano un'eccezione: meglio un messaggio
+// d'errore che un AP "non impostato" o dei goduti a zero che sembrano veri.
 async function caricaAP(anno) {
-  try {
-    const { data, error } = await sb
-      .from(ANNO_AP_TABLE)
-      .select('ap_ferie, ap_permessi, bloccato, ap_configurato')
-      .eq('anno', parseInt(anno, 10))
-      .maybeSingle();
-    if (error) {
-      console.error('Errore caricaAP:', error);
-      return { ap_ferie: 0, ap_permessi: 0, bloccato: false };
-    }
-    return data || { ap_ferie: 0, ap_permessi: 0, bloccato: false, ap_configurato: false };
-  } catch (e) {
-    console.error('Eccezione caricaAP:', e);
-    return { ap_ferie: 0, ap_permessi: 0, bloccato: false };
-  }
+  const { data, error } = await sb
+    .from(ANNO_AP_TABLE)
+    .select('ap_ferie, ap_permessi, bloccato, ap_configurato')
+    .eq('anno', parseInt(anno, 10))
+    .maybeSingle();
+  if (error) throw new Error('lettura AP ' + anno + ': ' + error.message);
+  return data || { ap_ferie: 0, ap_permessi: 0, bloccato: false, ap_configurato: false };
 }
 
 async function caricaMaturazione(anno) {
-  try {
-    const { data, error } = await sb
-      .from(MATURAZIONE_TABLE)
-      .select('mese, ferie_maturata, permessi_maturati')
-      .eq('anno', parseInt(anno, 10))
-      .order('mese', { ascending: true });
-    if (error) {
-      console.error('Errore caricaMaturazione:', error);
-      return null;
-    }
-    return data || null;
-  } catch (e) {
-    console.error('Eccezione caricaMaturazione:', e);
-    return null;
-  }
+  const { data, error } = await sb
+    .from(MATURAZIONE_TABLE)
+    .select('mese, ferie_maturata, permessi_maturati')
+    .eq('anno', parseInt(anno, 10));
+  if (error) throw new Error('lettura maturazione ' + anno + ': ' + error.message);
+  return data || [];
+}
+
+async function caricaGoduti(anno) {
+  const { data, error } = await sb
+    .from('ferie_mensili')
+    .select('mese, ferie_ore, permessi_ore')
+    .eq('anno', parseInt(anno, 10));
+  if (error) throw new Error('lettura goduti ' + anno + ': ' + error.message);
+  return data || [];
 }
 
 async function salvaAP(anno, ferie, permessi) {
@@ -224,14 +215,10 @@ async function esportaBackup() {
   const backup = {};
   try {
     for (const t of tabelle) {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=*`, {
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-        }
-      });
-      if (!res.ok) throw new Error(`Errore lettura ${t}: ${res.status}`);
-      backup[t] = await res.json();
+      // Passa dal client sb così usa il token della sessione (le regole RLS lo richiedono)
+      const { data, error } = await sb.from(t).select('*');
+      if (error) throw new Error(`lettura ${t}: ${error.message}`);
+      backup[t] = data;
     }
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -404,8 +391,6 @@ if (btnConfermaAP) btnConfermaAP.addEventListener('click', async () => {
   if (btnConfermaAP) btnConfermaAP.disabled = true;
   try {
     await salvaAP(anno, f, p);
-    apBloccato = true;
-    apValori = { ferie: parseFloat(f) || 0, permessi: parseFloat(p) || 0 };
     chiudiPopupAP();
     show('AP salvato e bloccato.', 'ok');
     caricaGriglia();
@@ -497,148 +482,73 @@ async function rimuoviAnnoDaUI(anno) {
   }
 }
 
-// Calcola residui per un anno, replicando le formule del foglio Google (maturazione da Supabase)
-async function calcolaAnno(anno) {
-  let ferieMaturazione = [], permMaturazione = [], godFRow = [], godPRow = [];
-  let maturazioneCaricata = false;
-  let csvTrovato = false;
+// Calcola i residui di un anno replicando le formule del foglio Google.
+// Tutti i dati arrivano da Supabase: maturazione_mensile, anno_ap, ferie_mensili.
+// Residuo mese = residuo precedente + maturazione - goduti (ferie e permessi separati, partendo dall'AP).
+async function calcolaAnno(anno, { conSuggerimento = true } = {}) {
+  const [maturazione, ap, goduti] = await Promise.all([
+    caricaMaturazione(anno),
+    caricaAP(anno),
+    caricaGoduti(anno)
+  ]);
 
-  try {
-    const r = await fetch(`data/Mie Ferie - ${anno}.csv`);
-    if (r.ok) {
-      csvTrovato = true;
-      const rows = parseCSV(await r.text());
-      // La maturazione dai CSV: righe 2 e 3 (indici 1,2)
-      ferieMaturazione = rows[1] || [];
-      permMaturazione = rows[2] || [];
-      // Goduti: righe 5 e 6 (indici 4,5)
-      godFRow = rows[4] || [];
-      godPRow = rows[5] || [];
-    }
-  } catch (e) {}
+  const matMap = {};
+  maturazione.forEach(r => { matMap[r.mese] = { f: parseFloat(r.ferie_maturata) || 0, p: parseFloat(r.permessi_maturati) || 0 }; });
+  const godMap = {};
+  goduti.forEach(r => { godMap[r.mese] = { f: parseFloat(r.ferie_ore) || 0, p: parseFloat(r.permessi_ore) || 0 }; });
 
-  // Carica maturazione da Supabase (se presente, sovrascrive CSV)
-  const matSupabase = await caricaMaturazione(anno);
-  if (matSupabase) {
-    ferieMaturazione = [];
-    permMaturazione = [];
-    for (let i = 0; i < 12; i++) {
-      const row = matSupabase.find(m => m.mese === MESI[i]);
-      if (row) {
-        ferieMaturazione[i + 2] = row.ferie_maturata; // colonna C (Gennaio)
-        permMaturazione[i + 2] = row.permessi_maturati;
-      }
-    }
-    maturazioneCaricata = true;
-  }
-
-  // --- AP: leggi da CSV (colonna B, indice 1) se presente e non vuoto ---
-  // Nota: con maturazione da Supabase (o senza CSV) l'indice 1 e' undefined,
-  // va trattato come cella vuota altrimenti l'AP risulterebbe bloccato a zero.
-  const apFStr = ferieMaturazione[1] === undefined || ferieMaturazione[1] === null ? '' : String(ferieMaturazione[1]).trim();
-  const apPStr = permMaturazione[1] === undefined || permMaturazione[1] === null ? '' : String(permMaturazione[1]).trim();
-  let apFerie = parseIT(ferieMaturazione[1]);
-  let apPermessi = parseIT(permMaturazione[1]);
-  const apCSVVuoto = apFStr === '' && apPStr === '';
-  let apConfigurato = false;
-
-  let apDaSupabase = null;
-  if (apCSVVuoto) {
-    apDaSupabase = await caricaAP(anno);
-    if (apDaSupabase && apDaSupabase.bloccato === true && apDaSupabase.ap_configurato === true) {
-      apFerie = parseFloat(apDaSupabase.ap_ferie) || 0;
-      apPermessi = parseFloat(apDaSupabase.ap_permessi) || 0;
-      apBloccato = true;
-      apConfigurato = true;
-      apValori = { ferie: apFerie, permessi: apPermessi };
-    } else {
-      apBloccato = false;
-      apConfigurato = false;
-      apValori = { ferie: 0, permessi: 0 };
-    }
-  } else {
-    // AP presente nel CSV: consideriamolo già definito (bloccato e configurato)
-    apBloccato = true;
-    apConfigurato = true;
-    apValori = { ferie: apFerie, permessi: apPermessi };
-  }
-
-  // --- Suggerimento AP: residuo dicembre dell'anno precedente ---
-  let suggerimentoF = 0;
-  let suggerimentoP = 0;
-  const annoPrev = (parseInt(anno, 10) - 1).toString();
-  if (anni.includes(annoPrev)) {
-    try {
-      const rPrev = await fetch(`data/Mie Ferie - ${annoPrev}.csv`);
-      if (rPrev.ok) {
-        const prevRows = parseCSV(await rPrev.text());
-        for (let r = 0; r < prevRows.length; r++) {
-          const row = prevRows[r];
-          const joined = row.join(' ').toUpperCase();
-          if (joined.includes('FERIE RESIDUE TEORIC')) {
-            for (let c = row.length - 1; c >= 0; c--) {
-              const v = parseIT(row[c]);
-              if (String(row[c]) !== '' && !isNaN(v)) { suggerimentoF = v; break; }
-            }
-          }
-          if (joined.includes('PERMESSI RESIDUI TEORIC')) {
-            for (let c = row.length - 1; c >= 0; c--) {
-              const v = parseIT(row[c]);
-              if (String(row[c]) !== '' && !isNaN(v)) { suggerimentoP = v; break; }
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // ignorato: suggerimento resta 0
-    }
-  }
-
-  // --- Carica goduti da Supabase ---
-  const { data: dbRows } = await sb
-    .from('ferie_mensili')
-    .select('mese, ferie_ore, permessi_ore')
-    .eq('anno', parseInt(anno, 10));
-
-  const dbMap = {};
-  if (dbRows) {
-    dbRows.forEach(row => { dbMap[row.mese] = { f: parseFloat(row.ferie_ore), p: parseFloat(row.permessi_ore) }; });
-  }
+  // AP valido solo se confermato dal popup (bloccato + ap_configurato)
+  const apConfigurato = ap.bloccato === true && ap.ap_configurato === true;
+  const apFerie = apConfigurato ? (parseFloat(ap.ap_ferie) || 0) : 0;
+  const apPermessi = apConfigurato ? (parseFloat(ap.ap_permessi) || 0) : 0;
 
   const mesi = [];
   let runningF = apFerie;
   let runningP = apPermessi;
-
   for (let i = 0; i < 12; i++) {
-    const col = i + 2; // colonna C (indice 2) = Gennaio
-    const matF = parseIT(ferieMaturazione[col]);
-    const matP = parseIT(permMaturazione[col]);
-    const saved = dbMap[MESI[i]];
-    const godF = saved !== undefined ? saved.f : parseIT(godFRow[col]);
-    const godP = saved !== undefined ? saved.p : parseIT(godPRow[col]);
-
-    runningF += (matF - godF);
-    runningP += (matP - godP);
-
+    const mat = matMap[MESI[i]] || { f: 0, p: 0 };
+    const god = godMap[MESI[i]] || { f: 0, p: 0 };
+    runningF += (mat.f - god.f);
+    runningP += (mat.p - god.p);
     mesi.push({
       nome: MESI_LABEL[i],
-      matF, matP, godF, godP,
+      matF: mat.f, matP: mat.p, godF: god.f, godP: god.p,
       resF: runningF, resP: runningP,
       totale: runningF + runningP
     });
   }
 
-  return { anno, apFerie, apPermessi, apBloccato, apConfigurato, mesi, suggerimentoF, suggerimentoP, maturazioneCaricata, csvTrovato };
+  // Suggerimento AP: residuo reale di dicembre dell'anno precedente (calcolato dagli stessi dati)
+  let suggerimentoF = 0;
+  let suggerimentoP = 0;
+  const annoPrev = String(parseInt(anno, 10) - 1);
+  if (conSuggerimento && !apConfigurato && anni.includes(annoPrev)) {
+    try {
+      const prev = await calcolaAnno(annoPrev, { conSuggerimento: false });
+      const dic = prev.mesi[11];
+      suggerimentoF = Math.round(dic.resF * 100) / 100;
+      suggerimentoP = Math.round(dic.resP * 100) / 100;
+    } catch (e) {
+      console.error('Suggerimento AP non disponibile:', e);
+    }
+  }
+
+  return {
+    anno, apFerie, apPermessi,
+    apBloccato: apConfigurato, apConfigurato,
+    mesi, suggerimentoF, suggerimentoP,
+    maturazioneCaricata: maturazione.length > 0
+  };
 }
 
 function render(dati) {
   gridBody.innerHTML = '';
 
-  // Banner se maturazione da Supabase (nessun CSV)
-  if (dati.maturazioneCaricata && !dati.csvTrovato) {
+  // Avviso se per l'anno non c'è maturazione su Supabase (i residui sarebbero solo AP - goduti)
+  if (!dati.maturazioneCaricata) {
     const trInfo = document.createElement('tr');
     trInfo.className = 'row-info';
-    trInfo.innerHTML = `<td colspan="5" class="info-msg">⚠ Maturazione caricata da Supabase. Nessun CSV per ${dati.anno}.</td>`;
+    trInfo.innerHTML = `<td colspan="5" class="info-msg">⚠ Nessuna maturazione caricata per ${dati.anno}: importala con 📁.</td>`;
     gridBody.appendChild(trInfo);
   }
 
@@ -805,4 +715,60 @@ async function loadAnni() {
   caricaGriglia();
 }
 
-loadAnni();
+// --- Login (Supabase Auth) ---
+// Le regole RLS concedono i dati solo all'utente autenticato: senza sessione
+// si vede soltanto il riquadro di accesso.
+const loginForm = document.getElementById('loginForm');
+const loginEmail = document.getElementById('loginEmail');
+const loginPassword = document.getElementById('loginPassword');
+const btnLogin = document.getElementById('btnLogin');
+const loginMsg = document.getElementById('loginMsg');
+let appAvviata = false;
+
+function mostraLogin() {
+  appAvviata = false;
+  document.body.classList.add('non-autenticato');
+  gridBody.innerHTML = '';
+  ultimiDati = null;
+  chiudiReport();
+  if (loginPassword) loginPassword.value = '';
+  if (loginEmail) loginEmail.focus();
+}
+
+function avviaApp() {
+  document.body.classList.remove('non-autenticato');
+  if (loginMsg) loginMsg.textContent = '';
+  if (appAvviata) return; // SIGNED_IN può arrivare più volte (es. al ritorno sulla scheda)
+  appAvviata = true;
+  // Fuori dalla callback di onAuthStateChange: chiamare Supabase lì dentro può bloccarsi
+  setTimeout(loadAnni, 0);
+}
+
+loginForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (loginMsg) loginMsg.textContent = '';
+  btnLogin.disabled = true;
+  try {
+    const { error } = await sb.auth.signInWithPassword({
+      email: loginEmail.value.trim(),
+      password: loginPassword.value
+    });
+    if (error) throw error;
+    // avviaApp() parte da onAuthStateChange (SIGNED_IN)
+  } catch (err) {
+    if (loginMsg) loginMsg.textContent = err.message === 'Invalid login credentials'
+      ? 'Email o password errate.'
+      : 'Accesso non riuscito: ' + err.message;
+  } finally {
+    btnLogin.disabled = false;
+  }
+});
+
+document.getElementById('btnLogout')?.addEventListener('click', async () => {
+  await sb.auth.signOut();
+});
+
+sb.auth.onAuthStateChange((event, session) => {
+  if (session) avviaApp();
+  else mostraLogin();
+});

@@ -1,12 +1,19 @@
 # mie-ferie — Dashboard Ferie & Permessi
 
-Sito statico personale per tracciare ferie e permessi aziendali, replicando fedelmente le formule di un foglio Google Sheets. I goduti mensili e l'AP (Anno Precedente) sono salvati su **Supabase** per la sincronizzazione multi-dispositivo; la maturazione e i dati storici arrivano da CSV esportati dal foglio originale.
+Sito statico personale per tracciare ferie e permessi aziendali, replicando fedelmente le formule di un foglio Google Sheets. Tutti i dati (maturazione, goduti mensili, AP) stanno su **Supabase**, protetti da login e regole RLS: il sito pubblico mostra solo il riquadro di accesso.
 
 ## Stack
 
-- **Frontend**: HTML/CSS/JS vanilla (nessun build step, si apre direttamente `index.html`)
-- **Backend/DB**: Supabase (Postgres) con tabelle `anni`, `ferie_mensili`, `anno_ap`, `maturazione_mensile`
-- **Dati storici**: CSV in `data/` (esportati dal foglio Google, uno per anno) + script di importazione in Supabase
+- **Frontend**: HTML/CSS/JS vanilla (nessun build step)
+- **Backend/DB**: Supabase (Postgres + Auth) con tabelle `anni`, `ferie_mensili`, `anno_ap`, `maturazione_mensile`
+- **CSV del foglio Google**: solo in locale (`data/*.csv` è in `.gitignore`), usati una tantum dagli script di importazione
+
+## Sicurezza
+
+- La chiave anon in `supabase-config.js` è pubblica per natura (sito statico): da sola non dà accesso a nulla.
+- Le policy RLS (`supabase/rls.sql`) concedono lettura e scrittura solo all'utente proprietario (`auth.uid()`), ruolo `authenticated`. Le registrazioni pubbliche sono disattivate.
+- Gli script di importazione usano la **service role key** passata con la variabile `SUPABASE_SERVICE_KEY`: non va mai scritta nella repo.
+- I CSV con i dati personali non sono più versionati né pubblicati.
 
 ## Setup Supabase
 
@@ -50,17 +57,12 @@ create table if not exists maturazione_mensile (
   primary key (anno, mese)
 );
 
-alter table ferie_mensili enable row level security;
-alter table anno_ap enable row level security;
-alter table anni enable row level security;
-alter table maturazione_mensile enable row level security;
-create policy "ferie_mensili_all" on ferie_mensili for all using (true);
-create policy "anno_ap_all" on anno_ap for all using (true);
-create policy "anni_all" on anni for all using (true);
-create policy "maturazione_mensile_all" on maturazione_mensile for all using (true);
 ```
 
-3. Inserisci URL e anon key in `supabase-config.js`.
+3. **Authentication → Users → Add user**: crea il tuo utente (email + password).
+   **Authentication → Sign In / Providers**: disattiva "Allow new users to sign up".
+4. Apri `supabase/rls.sql`, sostituisci lo UUID segnaposto con quello del tuo utente ed eseguilo nel SQL Editor.
+5. Inserisci URL e anon key in `supabase-config.js`.
 
 ## Logica di calcolo (replica del foglio Google)
 
@@ -79,46 +81,46 @@ Nel sito le ferie e i permessi vengono tenuti separati (`resF`, `resP`) e la col
 
 ## AP (Anno Precedente)
 
-Per gli anni in cui `B2`/`B3` del CSV sono vuoti (es. 2027+), l'AP va impostato **da sito**:
+L'AP di ogni anno sta nella tabella `anno_ap` e vale solo se `bloccato = true` e `ap_configurato = true`. Se manca:
 
 - Appare una **barra AP** con bottone "Imposta AP".
-- Si apre un **popup** con due campi (Ferie AP, Permessi AP), **precompilati** con il residuo di dicembre dell'anno precedente (letto automaticamente dalle celle "FERIE RESIDUE TEORICA" / "PERMESSI RESIDUI TEORICI" del CSV precedente).
-- Dopo **"Conferma e blocca"**, i valori vengono salvati su Supabase (`anno_ap`) e bloccati: non si modificano più.
-- Se l'AP è "bloccato ma a zero", viene trattato come non bloccato per permetterne l'impostazione.
+- Si apre un **popup** con due campi (Ferie AP, Permessi AP), **precompilati** con il residuo reale di dicembre dell'anno precedente, calcolato dai dati su Supabase (stesso calcolo della griglia).
+- Dopo **"Conferma e blocca"**, i valori vengono salvati su Supabase (`anno_ap`) e bloccati.
 
 ## Struttura file
 
 ```
-index.html          # UI (griglia, form, popup AP, popup anni, popup importazione)
+index.html          # UI (login, griglia, form, popup AP, popup anni, popup importazione)
 style.css           # stile scuro "ledger"
-app.js              # logica di calcolo, Supabase, popup
+app.js              # login, logica di calcolo, Supabase, popup
 supabase-config.js  # URL e anon key Supabase
+supabase/
+  rls.sql           # policy RLS "solo proprietario"
 data/
   anni.json         # fallback legacy (il sito usa la tabella "anni" di Supabase)
-  Mie Ferie - 2026.csv
-  Mie Ferie - 2027.csv
-  ...
+  Mie Ferie - YYYY.csv  # SOLO in locale, ignorati da git
 scripts/
-  load_maturation.js  # importa la maturazione dai CSV a Supabase (nessuna dipendenza)
+  lib.js              # funzioni comuni (parser CSV, upsert REST con service key)
+  load_maturation.js  # importa la maturazione dai CSV a Supabase
+  import_goduti.js    # importa goduti e AP di un anno da CSV a Supabase
   serve.js            # server statico minimo per test locali (node scripts/serve.js)
 ```
 
-## Importare la maturazione dai CSV a Supabase
+## Importare i CSV in Supabase
 
-Lo script `scripts/load_maturation.js` legge tutti i file `data/Mie Ferie - YYYY.csv`,
-estrae le righe di maturazione (ferie e permessi per i 12 mesi) e le inserisce nella
-tabella `maturazione_mensile` (upsert, quindi rieseguibile senza duplicati). Inserisce
-anche gli anni nella tabella `anni`, così appaiono subito nel sito.
+Requisiti: **Node.js 18+** (nessun `npm install`) e la **service role key** di Supabase
+(Project Settings → API) nella variabile `SUPABASE_SERVICE_KEY`. I CSV vanno messi in
+`data/` (restano fuori da git).
 
-Requisiti: **Node.js 18+** (nessun `npm install`, lo script usa solo moduli integrati).
-
-```bash
-cd mie-ferie
-node scripts/load_maturation.js
+```powershell
+$env:SUPABASE_SERVICE_KEY = "<service role key>"
+node scripts/load_maturation.js            # maturazione di tutti gli anni in data/
+node scripts/import_goduti.js 2026 --dry-run   # mostra goduti e AP che verrebbero scritti
+node scripts/import_goduti.js 2026         # scrive goduti (ferie_mensili) e AP (anno_ap)
 ```
 
-Dopo l'importazione il sito legge la maturazione da Supabase; i CSV restano come
-fallback/backward-compatibilità (e per i goduti storici).
+Entrambi fanno upsert, quindi sono rieseguibili. `import_goduti.js` salta i mesi con
+entrambe le celle vuote e non tocca l'AP se la colonna B del CSV è vuota.
 
 ## Aggiungere un nuovo anno
 
@@ -134,7 +136,7 @@ fallback/backward-compatibilità (e per i goduti storici).
 
 ## Test locali
 
-I CSV vengono caricati con `fetch`, che su `file://` è bloccato dal browser. Per provare il sito in locale usa il server statico incluso:
+Per provare il sito in locale usa il server statico incluso (serve comunque il login):
 
 ```bash
 cd mie-ferie
@@ -169,9 +171,10 @@ Eliminato il workaround "se bloccato ma a zero, tratto come non bloccato".
 ### 4. Rimuovere `codice.gs` e aggiungere README ✅ (fatto)
 Il vecchio script Google Apps Script non è più utilizzato dato che il sito è standalone con Supabase + CSV. Rimosso. Questo README documenta setup e logica.
 
-### 5. Sicurezza / RLS più restrittiva
-- Policy RLS meno permissive (lettura pubblica, scrittura solo admin o via service role).
-- Valutare di proteggere l'anon key (richiederebbe un backend proxy).
+### 5. Sicurezza / RLS più restrittiva ✅ (fatto)
+Login con Supabase Auth, policy RLS solo per l'utente proprietario (`supabase/rls.sql`),
+script di importazione con service role key da variabile d'ambiente, CSV personali
+tolti da repo e sito.
 
 ### 6. Report / riepilogo annuale ✅ (fatto)
 Pulsante **📊** nel sito: apre una sezione "Report" con

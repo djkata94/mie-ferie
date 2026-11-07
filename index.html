@@ -1,8 +1,9 @@
 <!DOCTYPE html>
-<html>
+<html lang="it">
 <head>
   <base target="_top">
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -11,7 +12,23 @@
   <script src="supabase-config.js"></script>
   <title>Dashboard Ferie &amp; Permessi</title>
 </head>
-<body>
+<body class="non-autenticato">
+
+<!-- Login (Supabase Auth): l'app parte solo con una sessione valida -->
+<div id="loginOverlay" class="popup login-overlay">
+  <form id="loginForm" class="popup-content">
+    <h3>Accedi</h3>
+    <p>Registro ore ferie &amp; permessi.</p>
+    <label for="loginEmail">Email</label>
+    <input type="email" id="loginEmail" autocomplete="username" required>
+    <label for="loginPassword">Password</label>
+    <input type="password" id="loginPassword" autocomplete="current-password" required>
+    <div class="popup-btns">
+      <button type="submit" id="btnLogin">Entra</button>
+    </div>
+    <p id="loginMsg" class="login-msg"></p>
+  </form>
+</div>
 
 <div class="container">
   <div class="ledger-tab"><i class="fas fa-calendar-alt"></i> Registro Ore</div>
@@ -26,6 +43,7 @@
       <button id="btnImportaMaturation" class="btn-icon" title="Importa maturazione da CSV" onclick="apriPopupMaturation()">📁</button>
       <button id="btnExportBackup" class="btn-icon" title="Esporta backup JSON">💾</button>
       <button id="btnReport" class="btn-icon" title="Report annuale">📊</button>
+      <button id="btnLogout" class="btn-icon" title="Esci">⏻</button>
     </div>
   </div>
 
