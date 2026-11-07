@@ -7,11 +7,19 @@
 --    con lo UUID dell'utente (colonna "UID" in Authentication → Users).
 -- 2. Esegui tutto lo script. È rieseguibile.
 
--- Via le vecchie policy aperte a tutti ("for all using (true)")
-drop policy if exists "ferie_mensili_all" on ferie_mensili;
-drop policy if exists "anno_ap_all" on anno_ap;
-drop policy if exists "anni_all" on anni;
-drop policy if exists "maturazione_mensile_all" on maturazione_mensile;
+-- Via QUALSIASI altra policy su queste 4 tabelle, qualunque nome abbia
+-- (le policy sono in OR: ne basta una aperta per lasciare passare tutti).
+do $$
+declare p record;
+begin
+  for p in
+    select tablename, policyname from pg_policies
+    where schemaname = 'public'
+      and tablename in ('anni', 'ferie_mensili', 'anno_ap', 'maturazione_mensile')
+  loop
+    execute format('drop policy %I on public.%I', p.policyname, p.tablename);
+  end loop;
+end $$;
 
 drop policy if exists "solo_owner" on ferie_mensili;
 drop policy if exists "solo_owner" on anno_ap;
@@ -39,8 +47,11 @@ create policy "solo_owner" on maturazione_mensile for all to authenticated
   using (auth.uid() = '00000000-0000-0000-0000-000000000000')
   with check (auth.uid() = '00000000-0000-0000-0000-000000000000');
 
--- Verifica: devono comparire solo le 4 policy "solo_owner", ruolo {authenticated}
-select tablename, policyname, roles, cmd
-from pg_policies
-where schemaname = 'public'
-order by tablename;
+-- Verifica: devono comparire solo le 4 policy "solo_owner", ruolo {authenticated},
+-- e rls_attivo = true su tutte e 4 le tabelle
+select c.relname as tabella, c.relrowsecurity as rls_attivo, p.policyname, p.roles, p.cmd
+from pg_class c
+left join pg_policies p on p.schemaname = 'public' and p.tablename = c.relname
+where c.relnamespace = 'public'::regnamespace
+  and c.relname in ('anni', 'ferie_mensili', 'anno_ap', 'maturazione_mensile')
+order by c.relname;
