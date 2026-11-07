@@ -242,6 +242,15 @@ const giornataNota = $('giornataNota');
 const btnAggiungiGiornata = $('btnAggiungiGiornata');
 const giornateMsg = $('giornateMsg');
 
+// Pannello aperto o chiuso: comodità di chi guarda, ricordata in questo browser (parte chiuso)
+const CHIAVE_GIORNATE_APERTE = 'mie-ferie:giornate-aperte';
+try {
+  giornateCard.open = localStorage.getItem(CHIAVE_GIORNATE_APERTE) === '1';
+} catch (e) { /* storage non disponibile (es. navigazione privata): resta chiuso */ }
+giornateCard.addEventListener('toggle', () => {
+  try { localStorage.setItem(CHIAVE_GIORNATE_APERTE, giornateCard.open ? '1' : '0'); } catch (e) { /* non essenziale */ }
+});
+
 function giornateMeseSelezionato() {
   const i = MESI.indexOf(mese.value);
   if (!ultimiDati || !ultimiDati.giornate || i < 0) return [];
@@ -274,6 +283,7 @@ function renderGiornate() {
     // Tabella non ancora creata su Supabase
     aggiornaBloccoMese(false);
     $('giornateTotale').textContent = '';
+    $('giornateConteggio').textContent = '';
     giornataForm.style.display = 'none';
     lista.innerHTML = '<p class="giornate-vuoto">Dettaglio giornaliero non ancora attivo: va lanciato <code>supabase/giornate.sql</code> su Supabase.</p>';
     return;
@@ -284,6 +294,8 @@ function renderGiornate() {
   aggiornaBloccoMese(giornate.length > 0);
   const m = ultimiDati.mesi[i];
   $('giornateTotale').textContent = `Totale mese: F ${fmtIT(m.godF)}h · P ${fmtIT(m.godP)}h`;
+  const nGiorni = giornate.filter(g => !g.riporto).length;
+  $('giornateConteggio').textContent = nGiorni === 0 ? '' : (nGiorni === 1 ? '1 giornata' : `${nGiorni} giornate`);
 
   const { min, max } = limitiMese(parseInt(ultimiDati.anno, 10), i);
   giornataData.min = min;
