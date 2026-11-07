@@ -50,6 +50,9 @@ begin
 end;
 $$;
 
+-- Funzione trigger: non deve essere richiamabile da /rest/v1/rpc (il trigger scatta comunque)
+revoke execute on function registra_storico_goduti() from public, anon, authenticated;
+
 drop trigger if exists storico_goduti_trg on ferie_mensili;
 create trigger storico_goduti_trg
   after insert or update or delete on ferie_mensili

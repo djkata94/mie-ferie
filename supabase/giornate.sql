@@ -79,6 +79,9 @@ begin
 end;
 $$;
 
+-- Funzione trigger: non deve essere richiamabile da /rest/v1/rpc (il trigger scatta comunque)
+revoke execute on function goduti_giornalieri_aggiorna_mese() from public, anon, authenticated;
+
 drop trigger if exists goduti_giornalieri_trg on goduti_giornalieri;
 create trigger goduti_giornalieri_trg
   after insert or update or delete on goduti_giornalieri
