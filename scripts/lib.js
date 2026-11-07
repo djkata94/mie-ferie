@@ -6,7 +6,6 @@
 // Non salvarla mai nella repo.
 
 const SUPABASE_URL = 'https://esfaugsdnmxhkyozaezm.supabase.co';
-const MESI = ['GENNAIO','FEBBRAIO','MARZO','APRILE','MAGGIO','GIUGNO','LUGLIO','AGOSTO','SETTEMBRE','OTTOBRE','NOVEMBRE','DICEMBRE'];
 
 function chiave() {
   const k = process.env.SUPABASE_SERVICE_KEY;
@@ -30,7 +29,8 @@ async function upsert(table, rows, onConflict) {
       'Content-Type': 'application/json',
       'Prefer': 'resolution=merge-duplicates,return=representation'
     },
-    body: JSON.stringify(rows)
+    body: JSON.stringify(rows),
+    signal: AbortSignal.timeout(30000) // niente attese infinite se la rete si blocca
   });
   if (!res.ok) {
     throw new Error(`Supabase ha risposto ${res.status} per "${table}": ${await res.text()}`);
@@ -38,29 +38,8 @@ async function upsert(table, rows, onConflict) {
   return res.json().catch(() => null);
 }
 
-// Parser CSV (campi tra virgolette, numeri con virgola decimale)
-function parseCSV(text) {
-  const rows = [];
-  for (const line of text.split(/\r?\n/)) {
-    if (line.trim() === '') continue;
-    const row = [];
-    let i = 0;
-    while (i < line.length) {
-      let field = '';
-      if (line[i] === '"') {
-        i++;
-        while (i < line.length && line[i] !== '"') field += line[i++];
-        i++;
-      } else {
-        while (i < line.length && line[i] !== ',') field += line[i++];
-      }
-      row.push(field);
-      if (i < line.length && line[i] === ',') i++;
-    }
-    rows.push(row);
-  }
-  return rows;
-}
+// Parser CSV e numeri all'italiana: gli stessi del sito (logica.js), una copia sola
+const { parseCSV, parseIT: parseNumber, MESI } = require('../logica.js');
 
 function vuoto(str) {
   if (str === undefined || str === null) return true;
@@ -68,10 +47,6 @@ function vuoto(str) {
   return s === '' || s === '-';
 }
 
-function parseNumber(str) {
-  if (vuoto(str)) return 0;
-  return parseFloat(String(str).trim().replace(',', '.')) || 0;
-}
 
 // Anni per cui esiste "data/Mie Ferie - YYYY.csv" (i CSV restano solo in locale, fuori da git)
 function anniCSV(dataDir) {

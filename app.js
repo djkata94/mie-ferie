@@ -1,43 +1,59 @@
-const MESI = ["GENNAIO","FEBBRAIO","MARZO","APRILE","MAGGIO","GIUGNO","LUGLIO","AGOSTO","SETTEMBRE","OTTOBRE","NOVEMBRE","DICEMBRE"];
-const MESI_LABEL = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
+// mie-ferie: interfaccia e accesso a Supabase.
+// I calcoli puri (residui, suggerimento AP, validazione, classificazione errori)
+// stanno in logica.js, caricato prima di questo file e coperto dai test Node.
+
 const ANNO_AP_TABLE = 'anno_ap';
 const ANNI_TABLE = 'anni';
 const MATURAZIONE_TABLE = 'maturazione_mensile';
+const GODUTI_TABLE = 'ferie_mensili';
+const STORICO_TABLE = 'storico_goduti';
+const TIMEOUT_RETE_MS = 15000;
 
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// fetch con timeout: una richiesta bloccata diventa un errore "rete" invece di un'attesa infinita
+function fetchConTimeout(url, opzioni = {}) {
+  const timeout = AbortSignal.timeout(TIMEOUT_RETE_MS);
+  const signal = opzioni.signal && AbortSignal.any ? AbortSignal.any([opzioni.signal, timeout]) : (opzioni.signal || timeout);
+  return fetch(url, { ...opzioni, signal });
+}
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { fetch: fetchConTimeout }
+});
 
 let anni = [];
 let currentAnno = null;
 let ultimiDati = null;
 
-const selAnno = document.getElementById('selAnno');
-const apBar = document.getElementById('apBar');
-const apLabel = document.getElementById('apLabel');
-const apVal = document.getElementById('apVal');
-const btnModificaAP = document.getElementById('btnModificaAP');
-const mese = document.getElementById('mese');
-const ferie = document.getElementById('ferie');
-const permessi = document.getElementById('permessi');
-const btnSalva = document.getElementById('btnSalva');
-const status = document.getElementById('status');
-const gridBody = document.getElementById('gridBody');
-const popupAP = document.getElementById('popupAP');
-const apAnnoSpan = document.getElementById('apAnno');
-const apFerieInput = document.getElementById('apFerie');
-const apPermessiInput = document.getElementById('apPermessi');
-const btnConfermaAP = document.getElementById('btnConfermaAP');
-const btnAnnullaAP = document.getElementById('btnAnnullaAP');
-const apMsg = document.getElementById('apMsg');
-const popupAnni = document.getElementById('popupAnni');
-const listaAnni = document.getElementById('listaAnni');
-const nuovoAnnoInput = document.getElementById('nuovoAnno');
-const btnAggiungiAnno = document.getElementById('btnAggiungiAnno');
-const btnChiudiAnni = document.getElementById('btnChiudiAnni');
-const anniMsg = document.getElementById('anniMsg');
-const popupMaturation = document.getElementById('popupMaturation');
-const maturationFileInput = document.getElementById('maturationFileInput');
-const btnConfermaMaturation = document.getElementById('btnConfermaMaturation');
-const maturationMsg = document.getElementById('maturationMsg');
+const $ = (id) => document.getElementById(id);
+const selAnno = $('selAnno');
+const apBar = $('apBar');
+const apVal = $('apVal');
+const btnModificaAP = $('btnModificaAP');
+const mese = $('mese');
+const ferie = $('ferie');
+const permessi = $('permessi');
+const btnSalva = $('btnSalva');
+const status = $('status');
+const gridBody = $('gridBody');
+const popupAP = $('popupAP');
+const apAnnoSpan = $('apAnno');
+const apFerieInput = $('apFerie');
+const apPermessiInput = $('apPermessi');
+const btnConfermaAP = $('btnConfermaAP');
+const apMsg = $('apMsg');
+const popupAnni = $('popupAnni');
+const listaAnni = $('listaAnni');
+const nuovoAnnoInput = $('nuovoAnno');
+const btnAggiungiAnno = $('btnAggiungiAnno');
+const anniMsg = $('anniMsg');
+const popupMaturation = $('popupMaturation');
+const maturationFileInput = $('maturationFileInput');
+const btnConfermaMaturation = $('btnConfermaMaturation');
+const maturationMsg = $('maturationMsg');
+
+// ---------------------------------------------------------------------------
+// Messaggi ed errori
+// ---------------------------------------------------------------------------
 
 // Messaggio di stato sotto il form. Un solo timer: un messaggio nuovo non viene
 // nascosto dal timer di quello precedente; gli errori restano finché non arriva altro.
@@ -45,499 +61,98 @@ let showTimer = null;
 function show(testo, tipo = 'info') {
   clearTimeout(showTimer);
   status.textContent = testo;
-  status.style.color = tipo === 'ok' ? '#4ade80' : (tipo === 'err' ? '#f87171' : '#c99a4a');
+  status.className = 'status status-' + tipo;
   status.style.display = testo ? 'block' : 'none';
   if (testo && tipo !== 'err') showTimer = setTimeout(() => { status.style.display = 'none'; }, 3000);
 }
 
-// Popup per importazione maturazione
-function apriPopupMaturation() {
-  if (maturationFileInput) maturationFileInput.value = '';
-  if (maturationMsg) maturationMsg.textContent = '';
-  if (popupMaturation) popupMaturation.style.display = 'flex';
+// Errore di Supabase con il contesto di cosa si stava facendo; l'originale resta in cause
+class ErroreDati extends Error {
+  constructor(operazione, causa) {
+    super(`${operazione}: ${causa && causa.message ? causa.message : causa}`, { cause: causa });
+    this.name = 'ErroreDati';
+  }
 }
-function chiudiPopupMaturation() {
-  if (maturationMsg) maturationMsg.textContent = '';
-  if (popupMaturation) popupMaturation.style.display = 'none';
-}
-async function importaMaturationDaFile() {
-  if (!maturationFileInput || !maturationFileInput.files || maturationFileInput.files.length === 0) {
-    if (maturationMsg) maturationMsg.textContent = 'Seleziona un file CSV';
-    return;
-  }
-  const file = maturationFileInput.files[0];
-  const testo = await new Promise((r, j) => {
-    const fr = new FileReader();
-    fr.onload = () => r(fr.result);
-    fr.onerror = () => j(fr.error);
-    fr.readAsText(file);
-  });
 
-  // Estrai l'anno dal nome del file (es. "Mie Ferie - 2026.csv")
-  const nomeFile = file.name;
-  const match = nomeFile.match(/Mie Ferie\s*-\s*(\d{4})\.csv/);
-  if (!match) {
-    if (maturationMsg) maturationMsg.textContent = 'Nome file non valido. Usa il formato "Mie Ferie - YYYY.csv"';
-    return;
-  }
-  const anno = match[1];
-
-  const rows = parseCSV(testo);
-  // Le righe 2 e 3 (indici 1,2) contengono le maturazioni per ogni mese (col C-N)
-  const rowFerie = rows[1] || [];
-  const rowPermessi = rows[2] || [];
-
-  const upsertRows = [];
-  for (let i = 0; i < 12; i++) {
-    const col = i + 2; // colonna C (indice 2) = Gennaio
-    const mese = MESI[i];
-    const f = parseIT(rowFerie[col]);
-    const p = parseIT(rowPermessi[col]);
-    upsertRows.push({ anno: parseInt(anno, 10), mese, ferie_maturata: f, permessi_maturati: p });
-  }
-
-  btnConfermaMaturation.disabled = true;
+// Esegue una query Supabase e lancia ErroreDati se fallisce
+async function query(operazione, promessa) {
+  let risposta;
   try {
-    for (const r of upsertRows) {
-      await salvaMaturazione(r.anno, r.mese, r.ferie_maturata, r.permessi_maturati);
-    }
-    show('Dati di maturazione importati con successo per ' + anno, 'ok');
-    chiudiPopupMaturation();
-    caricaGriglia();
+    risposta = await promessa;
   } catch (e) {
-    show('Errore durante l importazione: ' + e.message, 'err');
-  } finally {
-    btnConfermaMaturation.disabled = false;
+    throw new ErroreDati(operazione, e);
   }
+  if (risposta.error) throw new ErroreDati(operazione, risposta.error);
+  return risposta.data;
 }
 
-function parseIT(s) {
-  if (s === null || s === undefined || String(s).trim() === '' || String(s).trim() === '-') return 0;
-  return parseFloat(String(s).replace(',', '.')) || 0;
-}
-
-function fmtIT(n) {
-  return n.toFixed(2).replace('.', ',');
-}
-
-function parseCSV(text) {
-  const rows = [];
-  const lines = text.split('\n');
-  for (const line of lines) {
-    if (line.trim() === '') continue;
-    const row = [];
-    let i = 0;
-    while (i < line.length) {
-      if (line[i] === '"') {
-        i++;
-        let field = '';
-        while (i < line.length && line[i] !== '"') {
-          field += line[i];
-          i++;
-        }
-        i++;
-        row.push(field);
-        if (i < line.length && line[i] === ',') i++;
-      } else {
-        let field = '';
-        while (i < line.length && line[i] !== ',') {
-          field += line[i];
-          i++;
-        }
-        row.push(field);
-        if (i < line.length && line[i] === ',') i++;
-      }
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-
-// Leggi dati da Supabase. In caso di errore lanciano un'eccezione: meglio un messaggio
-// d'errore che un AP "non impostato" o dei goduti a zero che sembrano veri.
-async function caricaAP(anno) {
-  const { data, error } = await sb
-    .from(ANNO_AP_TABLE)
-    .select('ap_ferie, ap_permessi, bloccato, ap_configurato')
-    .eq('anno', parseInt(anno, 10))
-    .maybeSingle();
-  if (error) throw new Error('lettura AP ' + anno + ': ' + error.message);
-  return data || { ap_ferie: 0, ap_permessi: 0, bloccato: false, ap_configurato: false };
-}
-
-async function caricaMaturazione(anno) {
-  const { data, error } = await sb
-    .from(MATURAZIONE_TABLE)
-    .select('mese, ferie_maturata, permessi_maturati')
-    .eq('anno', parseInt(anno, 10));
-  if (error) throw new Error('lettura maturazione ' + anno + ': ' + error.message);
-  return data || [];
-}
-
-async function caricaGoduti(anno) {
-  const { data, error } = await sb
-    .from('ferie_mensili')
-    .select('mese, ferie_ore, permessi_ore')
-    .eq('anno', parseInt(anno, 10));
-  if (error) throw new Error('lettura goduti ' + anno + ': ' + error.message);
-  return data || [];
-}
-
-async function salvaAP(anno, ferie, permessi) {
-  const { error } = await sb
-    .from(ANNO_AP_TABLE)
-    .upsert({
-      anno: parseInt(anno, 10),
-      ap_ferie: parseFloat(ferie) || 0,
-      ap_permessi: parseFloat(permessi) || 0,
-      bloccato: true,
-      ap_configurato: true,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'anno' });
-  if (error) throw error;
-}
-
-async function salvaMaturazione(anno, mese, ferie, permessi) {
-  const { error } = await sb
-    .from(MATURAZIONE_TABLE)
-    .upsert({
-      anno: parseInt(anno, 10),
-      mese,
-      ferie_maturata: parseFloat(ferie) || 0,
-      permessi_maturati: parseFloat(permessi) || 0,
-      updated_at: new Date().toISOString()
-    }, { onConflict: ['anno', 'mese'] });
-  if (error) throw error;
-}
-
-// Esportazione backup dati Supabase (tutte le tabelle)
-async function esportaBackup() {
-  const tabelle = ['anni', 'ferie_mensili', 'anno_ap', 'maturazione_mensile'];
-  const backup = {};
-  try {
-    for (const t of tabelle) {
-      // Passa dal client sb così usa il token della sessione (le regole RLS lo richiedono)
-      const { data, error } = await sb.from(t).select('*');
-      if (error) throw new Error(`lettura ${t}: ${error.message}`);
-      backup[t] = data;
-    }
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `mie-ferie-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    show('Backup esportato.', 'ok');
-  } catch (e) {
-    show('Errore export backup: ' + e.message, 'err');
-  }
-}
-
-// --- Report / riepilogo annuale ---
-function sommaMesi(dati) {
-  let matF = 0, matP = 0, godF = 0, godP = 0;
-  dati.mesi.forEach(m => { matF += m.matF; matP += m.matP; godF += m.godF; godP += m.godP; });
-  const residuoFinale = dati.mesi.length ? dati.mesi[dati.mesi.length - 1].totale : 0;
-  const apTot = (parseFloat(dati.apFerie) || 0) + (parseFloat(dati.apPermessi) || 0);
-  return { matF, matP, godF, godP, residuoFinale, apTot };
-}
-
-async function apriReport() {
-  const reportSection = document.getElementById('reportSection');
-  if (!reportSection) return;
-  reportSection.style.display = 'block';
-  if (document.getElementById('reportAnno')) document.getElementById('reportAnno').textContent = currentAnno;
-  await caricaReport();
-}
-
-function chiudiReport() {
-  const reportSection = document.getElementById('reportSection');
-  if (reportSection) reportSection.style.display = 'none';
-}
-
-function stampaReport() {
-  window.print();
-}
-
-async function caricaReport() {
-  const riepilogo = document.getElementById('reportRiepilogo');
-  const confronto = document.getElementById('reportConfronto');
-  if (!riepilogo || !confronto) return;
-
-  show('Genero report...', 'info');
-
-  // Riepilogo dell'anno selezionato (usa i dati già caricati in griglia)
-  const annoSel = currentAnno;
-  const datiSel = ultimiDati && String(ultimiDati.anno) === String(annoSel)
-    ? ultimiDati
-    : await calcolaAnno(annoSel);
-  const tSel = sommaMesi(datiSel);
-
-  riepilogo.innerHTML = `
-    <div class="report-cards">
-      <div class="report-card">
-        <span class="report-card-label">Maturato totale</span>
-        <span class="report-card-val">${fmtIT(tSel.matF + tSel.matP)}h</span>
-        <span class="report-card-sub">F ${fmtIT(tSel.matF)}h · P ${fmtIT(tSel.matP)}h</span>
-      </div>
-      <div class="report-card">
-        <span class="report-card-label">Goduti totale</span>
-        <span class="report-card-val">${fmtIT(tSel.godF + tSel.godP)}h</span>
-        <span class="report-card-sub">F ${fmtIT(tSel.godF)}h · P ${fmtIT(tSel.godP)}h</span>
-      </div>
-      <div class="report-card ${tSel.residuoFinale < 20 ? 'report-card-warn' : ''}">
-        <span class="report-card-label">Residuo finale</span>
-        <span class="report-card-val">${fmtIT(tSel.residuoFinale)}h</span>
-        <span class="report-card-sub">AP ${fmtIT(tSel.apTot)}h</span>
-      </div>
-    </div>
-  `;
-
-  // Confronto tra tutti gli anni
-  const righe = [];
-  for (const a of anni) {
-    let dati;
-    if (String(a) === String(annoSel)) {
-      dati = datiSel;
-    } else {
-      try { dati = await calcolaAnno(a); } catch (e) { dati = null; }
-    }
-    if (!dati) continue;
-    const t = sommaMesi(dati);
-    righe.push({ anno: a, t, selezionato: String(a) === String(annoSel) });
-  }
-
-  confronto.innerHTML = `
-    <table class="report-table">
-      <thead>
-        <tr>
-          <th>Anno</th><th>Maturato</th><th>Goduti</th><th>AP</th><th>Residuo</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${righe.map(r => `
-          <tr class="${r.selezionato ? 'report-row-sel' : ''}">
-            <td data-label="Anno">${r.anno}</td>
-            <td data-label="Maturato">${fmtIT(r.t.matF + r.t.matP)}h</td>
-            <td data-label="Goduti">${fmtIT(r.t.godF + r.t.godP)}h</td>
-            <td data-label="AP">${fmtIT(r.t.apTot)}h</td>
-            <td data-label="Residuo" class="${r.t.residuoFinale < 20 ? 'report-res-warn' : ''}">${fmtIT(r.t.residuoFinale)}h</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
-  `;
-
-  show('', 'info');
-}
-
-// Gestione anni da Supabase
-async function caricaAnniDaSupabase() {
-  const { data, error } = await sb.from(ANNI_TABLE).select('anno').order('anno', { ascending: true });
-  if (error) throw new Error('lettura anni: ' + error.message);
-  return (data || []).map(r => String(r.anno));
-}
-
-async function aggiungiAnno(anno) {
-  const { error } = await sb.from(ANNI_TABLE).upsert({ anno: parseInt(anno, 10) }, { onConflict: 'anno' });
-  if (error) throw error;
-}
-
-async function rimuoviAnno(anno) {
-  const { error } = await sb.from(ANNI_TABLE).delete().eq('anno', parseInt(anno, 10));
-  if (error) throw error;
-}
-
-// Funzioni per il popup AP
-function chiudiPopupAP() {
-  if (popupAP) popupAP.style.display = 'none';
-  if (apMsg) apMsg.textContent = '';
-}
-
-if (btnAnnullaAP) btnAnnullaAP.addEventListener('click', chiudiPopupAP);
-if (popupAP) popupAP.addEventListener('click', (e) => {
-  if (e.target === popupAP) chiudiPopupAP();
-});
-
-// Bottone "Imposta AP" della barra: popup con il suggerimento calcolato per l'anno a video
-btnModificaAP?.addEventListener('click', () => {
-  if (!currentAnno) return;
-  const d = ultimiDati && String(ultimiDati.anno) === String(currentAnno) ? ultimiDati : null;
-  apriPopupAP(currentAnno, d ? d.suggerimentoF : '', d ? d.suggerimentoP : '');
-});
-
-function apriPopupAP(anno, suggerimentoF, suggerimentoP) {
-  if (apAnnoSpan) apAnnoSpan.textContent = anno;
-  if (apFerieInput) apFerieInput.value = suggerimentoF !== undefined && suggerimentoF !== null ? suggerimentoF : '';
-  if (apPermessiInput) apPermessiInput.value = suggerimentoP !== undefined && suggerimentoP !== null ? suggerimentoP : '';
-  if (apMsg) apMsg.textContent = '';
-  if (popupAP) {
-    popupAP.style.display = 'flex';
-    if (apFerieInput) apFerieInput.focus();
-  }
-}
-
-if (btnConfermaAP) btnConfermaAP.addEventListener('click', async () => {
-  const anno = apAnnoSpan ? apAnnoSpan.textContent : currentAnno;
-  const f = apFerieInput ? apFerieInput.value : '';
-  const p = apPermessiInput ? apPermessiInput.value : '';
-  if (f === '' && p === '') {
-    if (apMsg) apMsg.textContent = 'Inserisci almeno un valore.';
-    return;
-  }
-  if (btnConfermaAP) btnConfermaAP.disabled = true;
-  try {
-    await salvaAP(anno, f, p);
-    chiudiPopupAP();
-    show('AP salvato e bloccato.', 'ok');
-    caricaGriglia();
-  } catch (e) {
-    show('Errore salvataggio AP: ' + e.message, 'err');
-  } finally {
-    if (btnConfermaAP) btnConfermaAP.disabled = false;
-  }
-});
-
-// Popup gestione anni
-function apriPopupAnni() {
-  aggiornaListaAnni();
-  if (popupAnni) popupAnni.style.display = 'flex';
-}
-
-function chiudiPopupAnni() {
-  if (popupAnni) popupAnni.style.display = 'none';
-  if (anniMsg) anniMsg.textContent = '';
-}
-
-if (btnChiudiAnni) btnChiudiAnni.addEventListener('click', chiudiPopupAnni);
-if (popupAnni) popupAnni.addEventListener('click', (e) => {
-  if (e.target === popupAnni) chiudiPopupAnni();
-});
-
-function aggiornaListaAnni() {
-  if (!listaAnni) return;
-  listaAnni.innerHTML = '';
-  anni.forEach(a => {
-    const row = document.createElement('div');
-    row.className = 'anno-row';
-    row.innerHTML = `
-      <span>${a}</span>
-      <button title="Rimuovi anno" onclick="rimuoviAnnoDaUI('${a}')">✕</button>
-    `;
-    listaAnni.appendChild(row);
-  });
-}
-
-async function aggiungiAnnoDaUI() {
-  const anno = nuovoAnnoInput ? nuovoAnnoInput.value : '';
-  if (!/^\d{4}$/.test(anno) || anno < '2000' || anno > '2100') {
-    if (anniMsg) anniMsg.textContent = 'Inserisci un anno valido (2000–2100).';
-    return;
-  }
-  if (anni.includes(anno)) {
-    if (anniMsg) anniMsg.textContent = 'Anno già presente.';
-    return;
-  }
-  if (btnAggiungiAnno) btnAggiungiAnno.disabled = true;
-  try {
-    await aggiungiAnno(anno);
-    anni.push(anno);
-    anni.sort();
-    aggiornaSelectAnni();
-    aggiornaListaAnni();
-    if (nuovoAnnoInput) nuovoAnnoInput.value = '';
-    if (anniMsg) anniMsg.textContent = '';
-    show('Anno ' + anno + ' aggiunto.', 'ok');
-    // Seleziona il nuovo anno e apri popup AP
-    selAnno.value = anno;
-    currentAnno = anno;
-    chiudiPopupAnni();
-    caricaGriglia();
-  } catch (e) {
-    if (anniMsg) anniMsg.textContent = 'Errore: ' + e.message;
-  } finally {
-    if (btnAggiungiAnno) btnAggiungiAnno.disabled = false;
-  }
-}
-
-async function rimuoviAnnoDaUI(anno) {
-  const msg = `Togliere il ${anno} dalla lista degli anni?\n\n` +
-    `Goduti, AP e maturazione del ${anno} restano salvati: se riaggiungi l'anno ricompaiono.`;
-  if (!confirm(msg)) return;
-  try {
-    await rimuoviAnno(anno);
-    const eraVisualizzato = currentAnno === anno;
-    anni = anni.filter(a => a !== anno);
-    aggiornaSelectAnni();
-    aggiornaListaAnni();
-    show('Anno ' + anno + ' tolto dalla lista.', 'ok');
-    // aggiornaSelectAnni ha già scelto un altro anno (o nessuno): ricarica se la griglia mostrava quello tolto
-    if (eraVisualizzato) caricaGriglia();
-  } catch (e) {
-    if (anniMsg) anniMsg.textContent = 'Errore: ' + e.message;
-  }
-}
-
-// Calcola i residui di un anno replicando le formule del foglio Google.
-// Tutti i dati arrivano da Supabase: maturazione_mensile, anno_ap, ferie_mensili.
-// Residuo mese = residuo precedente + maturazione - goduti (ferie e permessi separati, partendo dall'AP).
-async function calcolaAnno(anno, { conSuggerimento = true } = {}) {
-  const [maturazione, ap, goduti] = await Promise.all([
-    caricaMaturazione(anno),
-    caricaAP(anno),
-    caricaGoduti(anno)
-  ]);
-
-  const matMap = {};
-  maturazione.forEach(r => { matMap[r.mese] = { f: parseFloat(r.ferie_maturata) || 0, p: parseFloat(r.permessi_maturati) || 0 }; });
-  const godMap = {};
-  goduti.forEach(r => { godMap[r.mese] = { f: parseFloat(r.ferie_ore) || 0, p: parseFloat(r.permessi_ore) || 0 }; });
-
-  // AP valido solo se confermato dal popup (bloccato + ap_configurato)
-  const apConfigurato = ap.bloccato === true && ap.ap_configurato === true;
-  const apFerie = apConfigurato ? (parseFloat(ap.ap_ferie) || 0) : 0;
-  const apPermessi = apConfigurato ? (parseFloat(ap.ap_permessi) || 0) : 0;
-
-  const mesi = [];
-  let runningF = apFerie;
-  let runningP = apPermessi;
-  for (let i = 0; i < 12; i++) {
-    const mat = matMap[MESI[i]] || { f: 0, p: 0 };
-    const god = godMap[MESI[i]] || { f: 0, p: 0 };
-    runningF += (mat.f - god.f);
-    runningP += (mat.p - god.p);
-    mesi.push({
-      nome: MESI_LABEL[i],
-      matF: mat.f, matP: mat.p, godF: god.f, godP: god.p,
-      resF: runningF, resP: runningP,
-      totale: runningF + runningP
+// Unico punto in cui un errore diventa un messaggio per l'utente (e una riga in console).
+// azione: "Salvataggio di Marzo" ecc. dove: elemento in cui scriverlo (default: barra di stato).
+function segnalaErrore(e, azione, dove) {
+  const { tipo, messaggio } = classificaErrore(e);
+  if (tipo !== 'validazione') console.error(`[mie-ferie] ${azione}:`, e);
+  const testo = tipo === 'validazione' ? messaggio : `${azione} non riuscito: ${messaggio}`;
+  if (tipo === 'sessione') {
+    sb.auth.signOut().finally(() => {
+      if (loginMsg) loginMsg.textContent = 'Sessione scaduta: accedi di nuovo.';
     });
+    return testo;
   }
+  if (dove) dove.textContent = testo;
+  else show(testo, 'err');
+  return testo;
+}
 
-  // Suggerimento AP: residuo reale di dicembre dell'anno precedente (calcolato dagli stessi dati)
-  let suggerimentoF = 0;
-  let suggerimentoP = 0;
+// ---------------------------------------------------------------------------
+// Lettura dati
+// ---------------------------------------------------------------------------
+
+// Tutte le righe di maturazione, AP e goduti in 3 query (pochi kB): servono sia alla
+// griglia (anno + anno precedente per il suggerimento AP) sia al report (tutti gli anni).
+async function caricaTuttiIDati() {
+  const [maturazione, ap, goduti] = await Promise.all([
+    query('Lettura maturazione', sb.from(MATURAZIONE_TABLE).select('anno, mese, ferie_maturata, permessi_maturati')),
+    query('Lettura AP', sb.from(ANNO_AP_TABLE).select('anno, ap_ferie, ap_permessi, bloccato, ap_configurato')),
+    query('Lettura goduti', sb.from(GODUTI_TABLE).select('anno, mese, ferie_ore, permessi_ore'))
+  ]);
+  const n = (a) => parseInt(a, 10);
+  return (anno) => costruisciAnno(anno, {
+    maturazione: maturazione.filter(r => r.anno === n(anno)),
+    ap: ap.find(r => r.anno === n(anno)) || null,
+    goduti: goduti.filter(r => r.anno === n(anno))
+  });
+}
+
+// Dati per la griglia: l'anno richiesto più il suggerimento AP dal dicembre precedente
+async function calcolaAnno(anno) {
+  const datiDi = await caricaTuttiIDati();
+  const dati = datiDi(anno);
   const annoPrev = String(parseInt(anno, 10) - 1);
-  if (conSuggerimento && !apConfigurato && anni.includes(annoPrev)) {
-    try {
-      const prev = await calcolaAnno(annoPrev, { conSuggerimento: false });
-      const dic = prev.mesi[11];
-      suggerimentoF = Math.round(dic.resF * 100) / 100;
-      suggerimentoP = Math.round(dic.resP * 100) / 100;
-    } catch (e) {
-      console.error('Suggerimento AP non disponibile:', e);
-    }
-  }
+  const sugg = !dati.apConfigurato && anni.includes(annoPrev) ? suggerimentoAP(datiDi(annoPrev)) : { ferie: 0, permessi: 0 };
+  return { ...dati, suggerimentoF: sugg.ferie, suggerimentoP: sugg.permessi };
+}
 
-  return {
-    anno, apFerie, apPermessi,
-    apBloccato: apConfigurato, apConfigurato,
-    mesi, suggerimentoF, suggerimentoP,
-    maturazioneCaricata: maturazione.length > 0
-  };
+async function caricaAnniDaSupabase() {
+  const righe = await query('Lettura anni', sb.from(ANNI_TABLE).select('anno').order('anno', { ascending: true }));
+  return righe.map(r => String(r.anno));
+}
+
+// ---------------------------------------------------------------------------
+// Griglia
+// ---------------------------------------------------------------------------
+
+function rigaAP(dati) {
+  const tr = document.createElement('tr');
+  tr.className = 'row-ap';
+  const v = (n) => dati.apConfigurato ? `${fmtIT(n)}h` : '-';
+  tr.innerHTML = `
+    <td data-label="AP">AP (Anno Prec.)</td>
+    <td class="god-val" data-label="Godute">- / -</td>
+    <td class="res-val" data-label="Resid. Ferie">${v(dati.apFerie)}</td>
+    <td class="res-val" data-label="Resid. Permessi">${v(dati.apPermessi)}</td>
+    <td class="tot-val" data-label="Totale">${v(dati.apFerie + dati.apPermessi)}</td>
+  `;
+  return tr;
 }
 
 function render(dati) {
@@ -551,38 +166,10 @@ function render(dati) {
     gridBody.appendChild(trInfo);
   }
 
-  // Barra AP: visibile finché l'AP non è stato configurato (flag ap_configurato)
-  const apEffettivamenteBloccato = dati.apBloccato && dati.apConfigurato;
-
-  if (apEffettivamenteBloccato) {
-    if (apBar) apBar.style.display = 'none';
-    const trAP = document.createElement('tr');
-    trAP.className = 'row-ap';
-    trAP.innerHTML = `
-      <td data-label="AP">AP (Anno Prec.)</td>
-      <td class="god-val" data-label="Godute">- / -</td>
-      <td class="res-val" data-label="Resid. Ferie">${fmtIT(dati.apFerie)}h</td>
-      <td class="res-val" data-label="Resid. Permessi">${fmtIT(dati.apPermessi)}h</td>
-      <td class="tot-val" data-label="Totale">${fmtIT(dati.apFerie + dati.apPermessi)}h</td>
-    `;
-    gridBody.appendChild(trAP);
-  } else {
-    if (apBar) {
-      apBar.style.display = 'block';
-      if (apLabel) apLabel.textContent = 'AP (Anno Prec.):';
-      if (apVal) apVal.textContent = 'non impostato';
-    }
-    const trAP = document.createElement('tr');
-    trAP.className = 'row-ap';
-    trAP.innerHTML = `
-      <td data-label="AP">AP (Anno Prec.)</td>
-      <td class="god-val" data-label="Godute">- / -</td>
-      <td class="res-val" data-label="Resid. Ferie">-</td>
-      <td class="res-val" data-label="Resid. Permessi">-</td>
-      <td class="tot-val" data-label="Totale">-</td>
-    `;
-    gridBody.appendChild(trAP);
-  }
+  // Barra "AP non impostato" finché l'AP dell'anno non è confermato
+  apBar.style.display = dati.apConfigurato ? 'none' : 'flex';
+  if (apVal) apVal.textContent = 'non impostato';
+  gridBody.appendChild(rigaAP(dati));
 
   dati.mesi.forEach((m, i) => {
     const tr = document.createElement('tr');
@@ -605,15 +192,13 @@ function render(dati) {
   });
 
   // Avviso soglia residuo totale (ferie + permessi) sotto 20h
-  const sogliaContainer = document.getElementById('sogliaAlert');
-  const ultimo = dati.mesi[dati.mesi.length - 1];
-  if (ultimo && ultimo.totale < 20) {
-    if (sogliaContainer) {
-      sogliaContainer.innerHTML = `⚠ Attenzione: residuo totale di ${fmtIT(ultimo.totale)}h (inferiore a 20h).`;
-      sogliaContainer.style.display = 'block';
-    }
-  } else if (sogliaContainer) {
-    sogliaContainer.style.display = 'none';
+  const soglia = $('sogliaAlert');
+  const ultimo = dati.mesi[11];
+  if (ultimo.totale < 20) {
+    soglia.textContent = `⚠ Attenzione: residuo totale di ${fmtIT(ultimo.totale)}h (inferiore a 20h).`;
+    soglia.style.display = 'block';
+  } else {
+    soglia.style.display = 'none';
   }
 
   precompilaMese();
@@ -628,131 +213,198 @@ function precompilaMese() {
 }
 mese.addEventListener('change', precompilaMese);
 
-// Griglia vuota quando non c'è nessun anno (es. dopo averli rimossi tutti)
-function mostraNessunAnno() {
+// Griglia vuota senza numeri: nessun anno, oppure lettura fallita (mai residui parziali)
+function svuotaGriglia(messaggio) {
   ultimiDati = null;
-  currentAnno = null;
-  if (apBar) apBar.style.display = 'none';
-  const soglia = document.getElementById('sogliaAlert');
-  if (soglia) soglia.style.display = 'none';
-  gridBody.innerHTML = `<tr class="row-info"><td colspan="5" class="info-msg">Nessun anno: aggiungine uno con ⚙.</td></tr>`;
+  apBar.style.display = 'none';
+  $('sogliaAlert').style.display = 'none';
+  gridBody.innerHTML = messaggio
+    ? `<tr class="row-info"><td colspan="5" class="info-msg">${messaggio}</td></tr>`
+    : '';
   precompilaMese();
 }
 
 let caricamentoId = 0;
 async function caricaGriglia() {
   const anno = selAnno.value;
-  if (!anno) { mostraNessunAnno(); return true; }
+  if (!anno) {
+    currentAnno = null;
+    svuotaGriglia('Nessun anno: aggiungine uno con ⚙.');
+    return true;
+  }
   currentAnno = anno;
   // Se si cambia anno prima che il caricamento precedente finisca, vince l'ultimo
   const mioId = ++caricamentoId;
-  ultimiDati = null;
+  svuotaGriglia();
   show('Caricamento...', 'info');
-  gridBody.innerHTML = '';
-  if (apBar) apBar.style.display = 'none';
 
   try {
     const dati = await calcolaAnno(anno);
     if (mioId !== caricamentoId) return false;
     ultimiDati = dati;
     render(dati);
-
-    // Popup AP automatico solo per l'anno in corso; per gli altri anni basta la barra "Imposta AP"
-    if (!dati.apBloccato && anno === String(new Date().getFullYear())) {
-      setTimeout(() => {
-        apriPopupAP(anno, dati.suggerimentoF, dati.suggerimentoP);
-      }, 400);
-    }
-
     show('', 'info');
+
+    // Popup AP automatico solo se la lettura è riuscita, l'AP manca davvero ed è l'anno in corso
+    if (!dati.apConfigurato && anno === String(new Date().getFullYear())) {
+      setTimeout(() => apriPopupAP(anno, dati.suggerimentoF, dati.suggerimentoP), 400);
+    }
     return true;
   } catch (e) {
     if (mioId !== caricamentoId) return false;
-    show('Errore nel caricamento: ' + e.message, 'err');
+    svuotaGriglia('Dati non disponibili: riprova ricaricando la pagina.');
+    segnalaErrore(e, `Caricamento del ${anno}`);
     return false;
   }
 }
 
-const MAX_ORE_MESE = 200;
+// ---------------------------------------------------------------------------
+// Salvataggio goduti
+// ---------------------------------------------------------------------------
 
-// Legge un campo ore: vuoto = "non modificare" (null), altrimenti numero tra 0 e MAX_ORE_MESE
-function leggiOre(input, nome) {
+function leggiCampoOre(input, nome) {
   // Con type="number" un testo non valido arriva come stringa vuota: non va scambiato per "vuoto"
-  if (input.validity && input.validity.badInput) throw new Error(`${nome}: valore non valido.`);
-  const s = input.value.trim();
-  if (s === '') return null;
-  const n = parseFloat(s.replace(',', '.'));
-  if (!isFinite(n) || n < 0) throw new Error(`${nome}: inserisci un numero di ore maggiore o uguale a 0.`);
-  if (n > MAX_ORE_MESE) throw new Error(`${nome}: ${fmtIT(n)} ore in un mese sono troppe (massimo ${MAX_ORE_MESE}).`);
-  return Math.round(n * 100) / 100;
+  if (input.validity && input.validity.badInput) throw new ErroreValidazione(`${nome}: valore non valido.`);
+  return parseOre(input.value, nome);
 }
 
 async function inviaDati() {
   const anno = selAnno.value;
-  const m = mese.value;
-  const i = MESI.indexOf(m);
-  if (!anno || i < 0 || !ultimiDati || String(ultimiDati.anno) !== String(anno)) {
-    show('Attendi il caricamento dell\'anno prima di salvare.', 'err');
+  const i = MESI.indexOf(mese.value);
+  if (!anno || i < 0 || !ultimiDati || ultimiDati.anno !== String(anno)) {
+    show('Dati dell\'anno non caricati: attendi o ricarica la pagina prima di salvare.', 'err');
     return;
   }
 
-  let nuovaF, nuovaP;
+  let piano;
   try {
-    nuovaF = leggiOre(ferie, 'Ferie');
-    nuovaP = leggiOre(permessi, 'Permessi');
+    piano = pianificaSalvataggio(ultimiDati.mesi[i], leggiCampoOre(ferie, 'Ferie'), leggiCampoOre(permessi, 'Permessi'));
   } catch (e) {
-    show(e.message, 'err');
+    segnalaErrore(e, 'Salvataggio');
     return;
   }
-  if (nuovaF === null && nuovaP === null) {
-    show('Inserisci le ore di ferie o di permessi (0 per azzerare).', 'err');
-    return;
-  }
-
-  // Campo vuoto = mantieni il valore attuale (prima veniva salvato 0, cancellando il dato)
-  const attuale = ultimiDati.mesi[i];
-  const f = nuovaF === null ? attuale.godF : nuovaF;
-  const p = nuovaP === null ? attuale.godP : nuovaP;
-
-  const cambi = [];
-  if (f !== attuale.godF) cambi.push({ nome: 'Ferie', da: attuale.godF, a: f });
-  if (p !== attuale.godP) cambi.push({ nome: 'Permessi', da: attuale.godP, a: p });
-  if (cambi.length === 0) {
+  if (piano.cambi.length === 0) {
     show('Nessuna modifica da salvare.', 'info');
     return;
   }
-  // Conferma solo se si sovrascrive un valore già registrato (diverso da 0)
-  const sovrascritti = cambi.filter(c => c.da !== 0);
-  if (sovrascritti.length > 0) {
-    const righe = sovrascritti.map(c => `${c.nome} di ${MESI_LABEL[i]}: ${fmtIT(c.da)} → ${fmtIT(c.a)}`).join('\n');
+  if (piano.sovrascritti.length > 0) {
+    const righe = piano.sovrascritti.map(c => `${c.nome} di ${MESI_LABEL[i]}: ${fmtIT(c.da)} → ${fmtIT(c.a)}`).join('\n');
     if (!confirm(`Modifico i valori già salvati?\n\n${righe}`)) return;
   }
 
   btnSalva.disabled = true;
   show('Invio in corso...', 'info');
   try {
-    const { error } = await sb
-      .from('ferie_mensili')
-      .upsert({
-        anno: parseInt(anno, 10),
-        mese: m,
-        ferie_ore: f,
-        permessi_ore: p,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'anno,mese' });
-    if (error) throw error;
-
+    await query(`Salvataggio di ${MESI_LABEL[i]}`, sb.from(GODUTI_TABLE).upsert({
+      anno: parseInt(anno, 10),
+      mese: MESI[i],
+      ferie_ore: piano.f,
+      permessi_ore: piano.p,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'anno,mese' }));
+    // Il salvataggio è riuscito anche se poi la rilettura fallisce (caricaGriglia lo segnala da sé)
     if (await caricaGriglia()) show(`Salvato ${MESI_LABEL[i]}.`, 'ok');
-    else show(`Salvato ${MESI_LABEL[i]}, ma la griglia non si è ricaricata: aggiorna la pagina.`, 'err');
   } catch (e) {
-    show('Errore salvataggio: ' + e.message, 'err');
+    segnalaErrore(e, `Salvataggio di ${MESI_LABEL[i]}`);
   } finally {
     btnSalva.disabled = false;
   }
 }
 
-function impostaMeseCorrente() {
-  mese.value = MESI[new Date().getMonth()];
+// ---------------------------------------------------------------------------
+// Popup AP
+// ---------------------------------------------------------------------------
+
+function apriPopupAP(anno, suggerimentoF, suggerimentoP) {
+  apAnnoSpan.textContent = anno;
+  apFerieInput.value = suggerimentoF ?? '';
+  apPermessiInput.value = suggerimentoP ?? '';
+  apMsg.textContent = '';
+  popupAP.style.display = 'flex';
+  apFerieInput.focus();
+}
+
+function chiudiPopupAP() {
+  popupAP.style.display = 'none';
+  apMsg.textContent = '';
+}
+
+$('btnAnnullaAP').addEventListener('click', chiudiPopupAP);
+popupAP.addEventListener('click', (e) => { if (e.target === popupAP) chiudiPopupAP(); });
+
+// Bottone "Imposta AP" della barra: popup con il suggerimento calcolato per l'anno a video
+btnModificaAP.addEventListener('click', () => {
+  if (!currentAnno) return;
+  const d = ultimiDati && ultimiDati.anno === String(currentAnno) ? ultimiDati : null;
+  apriPopupAP(currentAnno, d ? d.suggerimentoF : '', d ? d.suggerimentoP : '');
+});
+
+btnConfermaAP.addEventListener('click', async () => {
+  const anno = apAnnoSpan.textContent;
+  // L'AP può essere negativo (ore anticipate), quindi niente parseOre qui
+  const leggi = (input, nome) => {
+    const s = input.value.trim().replace(',', '.');
+    if (s === '') return null;
+    const n = Number(s);
+    if (!isFinite(n) || Math.abs(n) > 1000) throw new ErroreValidazione(`${nome}: valore non valido.`);
+    return arrotonda2(n);
+  };
+  let f, p;
+  try {
+    f = leggi(apFerieInput, 'Ferie AP');
+    p = leggi(apPermessiInput, 'Permessi AP');
+    if (f === null && p === null) throw new ErroreValidazione('Inserisci almeno un valore.');
+  } catch (e) {
+    segnalaErrore(e, 'Salvataggio AP', apMsg);
+    return;
+  }
+  btnConfermaAP.disabled = true;
+  try {
+    await query(`Salvataggio AP ${anno}`, sb.from(ANNO_AP_TABLE).upsert({
+      anno: parseInt(anno, 10),
+      ap_ferie: f ?? 0,
+      ap_permessi: p ?? 0,
+      bloccato: true,
+      ap_configurato: true,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'anno' }));
+    chiudiPopupAP();
+    if (await caricaGriglia()) show('AP salvato e bloccato.', 'ok');
+  } catch (e) {
+    // L'errore resta nel popup, così i valori inseriti non si perdono
+    segnalaErrore(e, `Salvataggio AP ${anno}`, apMsg);
+  } finally {
+    btnConfermaAP.disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Gestione anni
+// ---------------------------------------------------------------------------
+
+function apriPopupAnni() {
+  aggiornaListaAnni();
+  anniMsg.textContent = '';
+  popupAnni.style.display = 'flex';
+}
+
+function chiudiPopupAnni() {
+  popupAnni.style.display = 'none';
+  anniMsg.textContent = '';
+}
+
+$('btnChiudiAnni').addEventListener('click', chiudiPopupAnni);
+popupAnni.addEventListener('click', (e) => { if (e.target === popupAnni) chiudiPopupAnni(); });
+
+function aggiornaListaAnni() {
+  listaAnni.innerHTML = '';
+  anni.forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'anno-row';
+    row.innerHTML = `<span>${a}</span><button title="Rimuovi anno">✕</button>`;
+    row.querySelector('button').addEventListener('click', () => rimuoviAnnoDaUI(a));
+    listaAnni.appendChild(row);
+  });
 }
 
 function aggiornaSelectAnni() {
@@ -760,64 +412,332 @@ function aggiornaSelectAnni() {
   anni.forEach(a => {
     const opt = document.createElement('option');
     opt.value = a;
-    opt.innerText = a;
+    opt.textContent = a;
     selAnno.appendChild(opt);
   });
-  const annoCorrente = new Date().getFullYear().toString();
-  selAnno.value = anni.includes(annoCorrente) ? annoCorrente : anni[anni.length - 1];
-  currentAnno = selAnno.value;
+  const annoCorrente = String(new Date().getFullYear());
+  selAnno.value = anni.includes(annoCorrente) ? annoCorrente : (anni[anni.length - 1] || '');
+  currentAnno = selAnno.value || null;
 }
 
-document.getElementById('btnExportBackup')?.addEventListener('click', esportaBackup);
-document.getElementById('btnReport')?.addEventListener('click', apriReport);
-document.getElementById('btnChiudiReport')?.addEventListener('click', chiudiReport);
-document.getElementById('btnStampaReport')?.addEventListener('click', stampaReport);
+async function aggiungiAnnoDaUI() {
+  const anno = nuovoAnnoInput.value.trim();
+  if (!/^\d{4}$/.test(anno) || anno < '2000' || anno > '2100') {
+    anniMsg.textContent = 'Inserisci un anno valido (2000–2100).';
+    return;
+  }
+  if (anni.includes(anno)) {
+    anniMsg.textContent = 'Anno già presente.';
+    return;
+  }
+  btnAggiungiAnno.disabled = true;
+  try {
+    await query(`Aggiunta del ${anno}`, sb.from(ANNI_TABLE).upsert({ anno: parseInt(anno, 10) }, { onConflict: 'anno' }));
+    anni.push(anno);
+    anni.sort();
+    aggiornaSelectAnni();
+    selAnno.value = anno;
+    nuovoAnnoInput.value = '';
+    chiudiPopupAnni();
+    if (await caricaGriglia()) show('Anno ' + anno + ' aggiunto.', 'ok');
+  } catch (e) {
+    segnalaErrore(e, `Aggiunta del ${anno}`, anniMsg);
+  } finally {
+    btnAggiungiAnno.disabled = false;
+  }
+}
+
+async function rimuoviAnnoDaUI(anno) {
+  const msg = `Togliere il ${anno} dalla lista degli anni?\n\n` +
+    `Goduti, AP e maturazione del ${anno} restano salvati: se riaggiungi l'anno ricompaiono.`;
+  if (!confirm(msg)) return;
+  try {
+    await query(`Rimozione del ${anno}`, sb.from(ANNI_TABLE).delete().eq('anno', parseInt(anno, 10)));
+    const eraVisualizzato = currentAnno === anno;
+    anni = anni.filter(a => a !== anno);
+    aggiornaSelectAnni();
+    aggiornaListaAnni();
+    show('Anno ' + anno + ' tolto dalla lista.', 'ok');
+    // aggiornaSelectAnni ha già scelto un altro anno (o nessuno): ricarica se la griglia mostrava quello tolto
+    if (eraVisualizzato) caricaGriglia();
+  } catch (e) {
+    segnalaErrore(e, `Rimozione del ${anno}`, anniMsg);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Importazione maturazione da CSV (file scelto dal PC, non più nella repo)
+// ---------------------------------------------------------------------------
+
+function apriPopupMaturation() {
+  maturationFileInput.value = '';
+  maturationMsg.textContent = '';
+  popupMaturation.style.display = 'flex';
+}
+
+function chiudiPopupMaturation() {
+  maturationMsg.textContent = '';
+  popupMaturation.style.display = 'none';
+}
+
+async function importaMaturationDaFile() {
+  const file = maturationFileInput.files && maturationFileInput.files[0];
+  if (!file) {
+    maturationMsg.textContent = 'Seleziona un file CSV.';
+    return;
+  }
+  const match = file.name.match(/Mie Ferie\s*-\s*(\d{4})\.csv$/i);
+  if (!match) {
+    maturationMsg.textContent = 'Nome file non valido. Usa il formato "Mie Ferie - YYYY.csv".';
+    return;
+  }
+  const anno = parseInt(match[1], 10);
+
+  btnConfermaMaturation.disabled = true;
+  try {
+    const righe = parseCSV(await file.text());
+    // Righe 2 e 3 (indici 1,2): maturazione ferie/permessi, colonne C..N (indici 2..13) = gennaio..dicembre
+    const rowFerie = righe[1] || [];
+    const rowPermessi = righe[2] || [];
+    if (!String(rowFerie[0] || '').toUpperCase().startsWith('FERIE') || !String(rowPermessi[0] || '').toUpperCase().startsWith('PERMESSI')) {
+      throw new ErroreValidazione('Il file non ha le righe FERIE e PERMESSI del foglio "Mie Ferie".');
+    }
+    const adesso = new Date().toISOString();
+    const upsertRows = MESI.map((m, i) => ({
+      anno, mese: m,
+      ferie_maturata: parseIT(rowFerie[i + 2]),
+      permessi_maturati: parseIT(rowPermessi[i + 2]),
+      updated_at: adesso
+    }));
+    // Una sola richiesta per i 12 mesi (prima erano 12 in serie)
+    await query(`Importazione maturazione ${anno}`, sb.from(MATURAZIONE_TABLE).upsert(upsertRows, { onConflict: 'anno,mese' }));
+    chiudiPopupMaturation();
+    if (await caricaGriglia()) show('Maturazione importata per il ' + anno + '.', 'ok');
+  } catch (e) {
+    segnalaErrore(e, 'Importazione', maturationMsg);
+  } finally {
+    btnConfermaMaturation.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Backup JSON
+// ---------------------------------------------------------------------------
+
+async function esportaBackup() {
+  const tabelle = [ANNI_TABLE, GODUTI_TABLE, ANNO_AP_TABLE, MATURAZIONE_TABLE];
+  try {
+    // Passa dal client sb così usa il token della sessione (le regole RLS lo richiedono)
+    const dati = await Promise.all(tabelle.map(t => query(`Lettura ${t}`, sb.from(t).select('*'))));
+    const backup = Object.fromEntries(tabelle.map((t, i) => [t, dati[i]]));
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mie-ferie-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    show('Backup esportato.', 'ok');
+  } catch (e) {
+    segnalaErrore(e, 'Backup');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Report annuale
+// ---------------------------------------------------------------------------
+
+function apriReport() {
+  if (!currentAnno) return;
+  chiudiStorico();
+  $('reportSection').style.display = 'block';
+  $('reportAnno').textContent = currentAnno;
+  caricaReport();
+}
+
+function chiudiReport() {
+  $('reportSection').style.display = 'none';
+}
+
+async function caricaReport() {
+  const riepilogo = $('reportRiepilogo');
+  const confronto = $('reportConfronto');
+  riepilogo.innerHTML = '<p class="loading">Calcolo in corso…</p>';
+  confronto.innerHTML = '';
+
+  let datiDi;
+  try {
+    // 3 query per tutti gli anni insieme (prima: 3 query per ogni anno, in serie)
+    datiDi = await caricaTuttiIDati();
+  } catch (e) {
+    riepilogo.innerHTML = '';
+    segnalaErrore(e, 'Report', riepilogo);
+    return;
+  }
+
+  const annoSel = currentAnno;
+  const tSel = sommaMesi(datiDi(annoSel));
+  riepilogo.innerHTML = `
+    <div class="report-cards">
+      <div class="report-card">
+        <span class="report-card-label">Maturato totale</span>
+        <span class="report-card-val">${fmtIT(tSel.matF + tSel.matP)}h</span>
+        <span class="report-card-sub">F ${fmtIT(tSel.matF)}h · P ${fmtIT(tSel.matP)}h</span>
+      </div>
+      <div class="report-card">
+        <span class="report-card-label">Goduti totale</span>
+        <span class="report-card-val">${fmtIT(tSel.godF + tSel.godP)}h</span>
+        <span class="report-card-sub">F ${fmtIT(tSel.godF)}h · P ${fmtIT(tSel.godP)}h</span>
+      </div>
+      <div class="report-card ${tSel.residuoFinale < 20 ? 'report-card-warn' : ''}">
+        <span class="report-card-label">Residuo finale</span>
+        <span class="report-card-val">${fmtIT(tSel.residuoFinale)}h</span>
+        <span class="report-card-sub">AP ${fmtIT(tSel.apTot)}h</span>
+      </div>
+    </div>
+  `;
+
+  const righe = anni.map(a => ({ anno: a, t: sommaMesi(datiDi(a)), selezionato: a === String(annoSel) }));
+  confronto.innerHTML = `
+    <table class="report-table">
+      <thead>
+        <tr><th>Anno</th><th>Maturato</th><th>Goduti</th><th>AP</th><th>Residuo</th></tr>
+      </thead>
+      <tbody>
+        ${righe.map(r => `
+          <tr class="${r.selezionato ? 'report-row-sel' : ''}">
+            <td data-label="Anno">${r.anno}</td>
+            <td data-label="Maturato">${fmtIT(r.t.matF + r.t.matP)}h</td>
+            <td data-label="Goduti">${fmtIT(r.t.godF + r.t.godP)}h</td>
+            <td data-label="AP">${fmtIT(r.t.apTot)}h</td>
+            <td data-label="Residuo" class="${r.t.residuoFinale < 20 ? 'report-res-warn' : ''}">${fmtIT(r.t.residuoFinale)}h</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Storico modifiche goduti (tabella scritta da un trigger, vedi supabase/storico.sql)
+// ---------------------------------------------------------------------------
+
+function apriStorico() {
+  if (!currentAnno) return;
+  chiudiReport();
+  $('storicoSection').style.display = 'block';
+  $('storicoAnno').textContent = currentAnno;
+  caricaStorico(currentAnno);
+}
+
+function chiudiStorico() {
+  $('storicoSection').style.display = 'none';
+}
+
+async function caricaStorico(anno) {
+  const box = $('storicoLista');
+  box.innerHTML = '<p class="loading">Carico lo storico…</p>';
+  let righe;
+  try {
+    righe = await query('Lettura storico', sb.from(STORICO_TABLE)
+      .select('mese, operazione, ferie_prima, permessi_prima, ferie_dopo, permessi_dopo, quando')
+      .eq('anno', parseInt(anno, 10))
+      .order('quando', { ascending: false })
+      .limit(200));
+  } catch (e) {
+    if (classificaErrore(e).tipo === 'tabella-mancante') {
+      console.error('[mie-ferie] Storico non attivo:', e);
+      box.innerHTML = '<p class="info-msg">Storico non ancora attivo: va lanciato <code>supabase/storico.sql</code> su Supabase.</p>';
+      return;
+    }
+    box.innerHTML = '';
+    segnalaErrore(e, 'Storico', box);
+    return;
+  }
+  if (righe.length === 0) {
+    box.innerHTML = `<p class="info-msg">Nessuna modifica registrata per il ${anno}.</p>`;
+    return;
+  }
+  const ore = (n) => n === null || n === undefined ? '—' : fmtIT(parseFloat(n));
+  const cambio = (prima, dopo) => prima === dopo ? ore(dopo) : `${ore(prima)} → ${ore(dopo)}`;
+  const nomeOp = { INSERT: 'Nuovo', UPDATE: 'Modifica', DELETE: 'Cancellato' };
+  const quando = (t) => new Date(t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  box.innerHTML = `
+    <table class="report-table">
+      <thead><tr><th>Quando</th><th>Mese</th><th>Ferie</th><th>Permessi</th><th>Tipo</th></tr></thead>
+      <tbody>
+        ${righe.map(r => `
+          <tr>
+            <td data-label="Quando">${quando(r.quando)}</td>
+            <td data-label="Mese">${MESI_LABEL[MESI.indexOf(r.mese)] || r.mese}</td>
+            <td data-label="Ferie">${cambio(r.ferie_prima, r.ferie_dopo)}</td>
+            <td data-label="Permessi">${cambio(r.permessi_prima, r.permessi_dopo)}</td>
+            <td data-label="Tipo">${nomeOp[r.operazione] || r.operazione}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Avvio e login (Supabase Auth)
+// ---------------------------------------------------------------------------
+
+$('btnExportBackup').addEventListener('click', esportaBackup);
+$('btnReport').addEventListener('click', apriReport);
+$('btnChiudiReport').addEventListener('click', chiudiReport);
+$('btnStampaReport').addEventListener('click', () => window.print());
+$('btnStorico').addEventListener('click', apriStorico);
+$('btnChiudiStorico').addEventListener('click', chiudiStorico);
 
 async function loadAnni() {
-  // Gli anni stanno solo nella tabella "anni" (niente più anni.json né lista fissa)
+  // Gli anni stanno solo nella tabella "anni"
   try {
     anni = await caricaAnniDaSupabase();
   } catch (e) {
-    show('Errore nel caricamento: ' + e.message, 'err');
+    svuotaGriglia('Dati non disponibili: riprova ricaricando la pagina.');
+    segnalaErrore(e, 'Caricamento degli anni');
     return;
   }
   aggiornaSelectAnni();
-  impostaMeseCorrente();
+  mese.value = MESI[new Date().getMonth()];
   caricaGriglia();
 }
 
-// --- Login (Supabase Auth) ---
 // Le regole RLS concedono i dati solo all'utente autenticato: senza sessione
 // si vede soltanto il riquadro di accesso.
-const loginForm = document.getElementById('loginForm');
-const loginEmail = document.getElementById('loginEmail');
-const loginPassword = document.getElementById('loginPassword');
-const btnLogin = document.getElementById('btnLogin');
-const loginMsg = document.getElementById('loginMsg');
+const loginForm = $('loginForm');
+const loginEmail = $('loginEmail');
+const loginPassword = $('loginPassword');
+const btnLogin = $('btnLogin');
+const loginMsg = $('loginMsg');
 let appAvviata = false;
 
 function mostraLogin() {
   appAvviata = false;
   document.body.classList.add('non-autenticato');
-  gridBody.innerHTML = '';
-  ultimiDati = null;
+  svuotaGriglia();
   chiudiReport();
-  if (loginPassword) loginPassword.value = '';
-  if (loginEmail) loginEmail.focus();
+  chiudiStorico();
+  loginPassword.value = '';
+  loginEmail.focus();
 }
 
 function avviaApp() {
   document.body.classList.remove('non-autenticato');
-  if (loginMsg) loginMsg.textContent = '';
+  loginMsg.textContent = '';
   if (appAvviata) return; // SIGNED_IN può arrivare più volte (es. al ritorno sulla scheda)
   appAvviata = true;
   // Fuori dalla callback di onAuthStateChange: chiamare Supabase lì dentro può bloccarsi
   setTimeout(loadAnni, 0);
 }
 
-loginForm?.addEventListener('submit', async (e) => {
+loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (loginMsg) loginMsg.textContent = '';
+  loginMsg.textContent = '';
   btnLogin.disabled = true;
   try {
     const { error } = await sb.auth.signInWithPassword({
@@ -827,17 +747,14 @@ loginForm?.addEventListener('submit', async (e) => {
     if (error) throw error;
     // avviaApp() parte da onAuthStateChange (SIGNED_IN)
   } catch (err) {
-    if (loginMsg) loginMsg.textContent = err.message === 'Invalid login credentials'
-      ? 'Email o password errate.'
-      : 'Accesso non riuscito: ' + err.message;
+    if (err && err.message === 'Invalid login credentials') loginMsg.textContent = 'Email o password errate.';
+    else segnalaErrore(err, 'Accesso', loginMsg);
   } finally {
     btnLogin.disabled = false;
   }
 });
 
-document.getElementById('btnLogout')?.addEventListener('click', async () => {
-  await sb.auth.signOut();
-});
+$('btnLogout').addEventListener('click', () => sb.auth.signOut());
 
 sb.auth.onAuthStateChange((event, session) => {
   if (session) avviaApp();

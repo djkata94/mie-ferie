@@ -1,0 +1,9 @@
+{
+  "name": "mie-ferie",
+  "private": true,
+  "description": "Dashboard ferie e permessi (sito statico + Supabase). Nessuna dipendenza: serve solo Node 22+ per test e script.",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\"",
+    "serve": "node scripts/serve.js 8765"
+  }
+}

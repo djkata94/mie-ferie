@@ -90,16 +90,22 @@ L'AP di ogni anno sta nella tabella `anno_ap` e vale solo se `bloccato = true` e
 ## Struttura file
 
 ```
-index.html          # UI (login, griglia, form, popup AP, popup anni, popup importazione)
+index.html          # UI (login, griglia, form, popup, report, storico)
 style.css           # stile scuro "ledger"
-app.js              # login, logica di calcolo, Supabase, popup
+logica.js           # calcoli puri (residui, suggerimento AP, validazione, errori): sito + test + script
+app.js              # login, Supabase, interfaccia; errori gestiti in segnalaErrore()
 supabase-config.js  # URL e anon key Supabase
+favicon.svg, manifest.webmanifest  # icona e installazione come app
+package.json        # solo gli script npm test / npm run serve (nessuna dipendenza)
 supabase/
   rls.sql           # policy RLS "solo proprietario"
+  storico.sql       # tabella storico_goduti + trigger su ferie_mensili
+tests/
+  logica.test.js    # test dei calcoli con i valori del foglio 2026
 data/
   Mie Ferie - YYYY.csv  # SOLO in locale, ignorati da git
 scripts/
-  lib.js              # funzioni comuni (parser CSV, upsert REST con service key)
+  lib.js              # upsert REST con service key (parser CSV preso da logica.js)
   load_maturation.js  # importa la maturazione dai CSV a Supabase
   import_goduti.js    # importa goduti e AP di un anno da CSV a Supabase
   serve.js            # server statico minimo per test locali (node scripts/serve.js)
@@ -107,7 +113,7 @@ scripts/
 
 ## Importare i CSV in Supabase
 
-Requisiti: **Node.js 18+** (nessun `npm install`) e la **service role key** di Supabase
+Requisiti: **Node.js 22+** (nessun `npm install`) e la **service role key** di Supabase
 (Project Settings → API) nella variabile `SUPABASE_SERVICE_KEY`. I CSV vanno messi in
 `data/` (restano fuori da git).
 
@@ -138,18 +144,32 @@ entrambe le celle vuote e non tocca l'AP se la colonna B del CSV è vuota.
 - **📁 Importa maturazione** – apre un popup per caricare un singolo CSV (`Mie Ferie - YYYY.csv`) direttamente dal sito.
 - **💾 Esporta backup JSON** – scarica tutte le tabelle Supabase in un file JSON di backup locale.
 - **📊 Report** – mostra il riepilogo dell'anno (maturato, goduti, residuo) e il confronto tra tutti gli anni, con stampa/PDF.
+- **🕘 Storico** – elenco delle modifiche ai goduti dell'anno (quando, mese, prima → dopo). Serve `supabase/storico.sql`.
 - **⚠️ Avviso soglia 20h** – banner rosso che appare quando il residuo totale (ferie + permessi) dell'ultimo mese scende sotto 20h.
 
-## Test locali
+## Test
 
-Per provare il sito in locale usa il server statico incluso (serve comunque il login):
+I calcoli stanno in `logica.js` e sono coperti da test Node senza dipendenze, che usano
+come riferimento i valori del foglio Google 2026 (residui mese per mese, O9/O10, suggerimento AP,
+salvataggio che non azzera i campi vuoti, riconoscimento degli errori):
 
 ```bash
-cd mie-ferie
-node scripts/serve.js 8765   # poi apri http://localhost:8765
+npm test
 ```
 
-(Nessuna dipendenza esterna.)
+Per provare il sito in locale (serve comunque il login):
+
+```bash
+npm run serve   # poi apri http://localhost:8765
+```
+
+## Errori
+
+Tutte le chiamate a Supabase passano da `query()` (aggiunge il contesto) e gli errori arrivano
+a un solo punto, `segnalaErrore()`, che scrive il dettaglio in console e mostra un messaggio in
+italiano: rete assente o lenta (timeout 15 s), sessione scaduta (torna al login), permessi
+negati (RLS), tabella mancante. Se la lettura fallisce la griglia resta vuota: niente residui
+parziali e niente popup AP aperto per errore.
 
 ---
 
@@ -192,8 +212,10 @@ Pulsante **📊** nel sito: apre una sezione "Report" con
 Banner persistente rosso (`#sogliaAlert`) quando il residuo totale (ferie + permessi)
 dell'ultimo mese scende sotto **20h totali**.
 
-### 8. Storico modifiche goduti
-Tabella `storico_goduti` che registra ogni modifica (data, mese, valore precedente, nuovo valore) per risolvere discrepanze.
+### 8. Storico modifiche goduti ✅ (fatto)
+Tabella `storico_goduti` scritta da un trigger su `ferie_mensili` (`supabase/storico.sql`):
+ogni inserimento, modifica o cancellazione con valori prima/dopo e data. Il sito la legge
+con il bottone 🕘 e non può modificarla.
 
 ### 9. Responsive mobile ✅ (fatto)
 Layout mobile-first sotto i 700px: la tabella diventa **card stacking** (una riga = una card con etichette `data-label`), titolo fluido con `clamp()`, colonna di input a riga singola, touch target 44px sui dispositivi touch.

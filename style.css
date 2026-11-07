@@ -1,3 +1,11 @@
+:root {
+  /* Colori del tema usati dai messaggi (il resto del foglio usa ancora i valori diretti) */
+  --brass: #c99a4a;
+  --ok: #4ade80;
+  --err: #f87171;
+  --muted: #9a9584;
+}
+
 body {
   background-color: #121309;
   background-image:
@@ -414,7 +422,7 @@ body.non-autenticato .login-overlay { display: flex; }
     color: #000 !important; padding: 0 !important; display: block !important;
   }
   .ledger-tab, .header-container, .msg, #sogliaAlert, .ap-bar,
-  .table-container, .input-card, #status { display: none !important; }
+  .table-container, .input-card, #status, #storicoSection { display: none !important; }
   .container { max-width: 100%; }
   #reportSection {
     display: block !important; position: static; border: none !important;
@@ -435,3 +443,15 @@ body.non-autenticato .login-overlay { display: flex; }
 
 /* Righe dei mesi cliccabili: selezionano il mese nel form */
 tr.row-mese { cursor: pointer; }
+
+/* Messaggio di stato sotto il form (show() in app.js imposta la classe) */
+.status {
+  font-size: 0.85rem; text-align: center; min-height: 20px; margin-top: 15px;
+  font-family: 'IBM Plex Mono', monospace; color: var(--brass);
+}
+.status-ok { color: var(--ok); }
+.status-err { color: var(--err); }
+.status-info { color: var(--brass); }
+
+.report-section code { font-family: 'IBM Plex Mono', monospace; color: var(--brass); }
+#storicoLista .info-msg { color: var(--muted); padding: 12px 0; }

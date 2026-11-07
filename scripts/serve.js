@@ -8,7 +8,7 @@ const root = path.join(__dirname, '..');
 const types = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
   '.json': 'application/json', '.csv': 'text/csv', '.png': 'image/png',
-  '.svg': 'image/svg+xml', '.ico': 'image/x-icon'
+  '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json'
 };
 
 http.createServer((req, res) => {

@@ -6,7 +6,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#121309">
+  <!-- Versione fissa: un aggiornamento di supabase-js non cambia il sito senza che ce ne accorgiamo -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
   <script src="supabase-config.js"></script>
   <title>Dashboard Ferie &amp; Permessi</title>
 </head>
@@ -41,11 +45,10 @@
       <button id="btnImportaMaturation" class="btn-icon" title="Importa maturazione da CSV" onclick="apriPopupMaturation()">📁</button>
       <button id="btnExportBackup" class="btn-icon" title="Esporta backup JSON">💾</button>
       <button id="btnReport" class="btn-icon" title="Report annuale">📊</button>
+      <button id="btnStorico" class="btn-icon" title="Storico modifiche goduti">🕘</button>
       <button id="btnLogout" class="btn-icon" title="Esci">⏻</button>
     </div>
   </div>
-
-  <div id="msg" class="msg"></div>
 
   <!-- Avviso soglia residuo totale sotto 20h -->
   <div id="sogliaAlert" class="msg err" style="display:none;"></div>
@@ -94,7 +97,7 @@
     </div>
     <button id="btnSalva" onclick="inviaDati()">Salva</button>
   </div>
-  <p id="status" style="font-size:0.85rem; color:var(--brass); text-align:center; min-height: 20px; margin-top:15px; font-family:'IBM Plex Mono', monospace;"></p>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
 
   <!-- Report / riepilogo annuale -->
   <div id="reportSection" class="report-section" style="display:none;">
@@ -108,6 +111,17 @@
     <div id="reportRiepilogo" class="report-riepilogo"></div>
     <h4 class="report-sub">Confronto tra anni</h4>
     <div id="reportConfronto" class="report-confronto"></div>
+  </div>
+
+  <!-- Storico modifiche goduti (tabella storico_goduti, scritta da un trigger) -->
+  <div id="storicoSection" class="report-section" style="display:none;">
+    <div class="report-header">
+      <h3>Storico modifiche <span id="storicoAnno"></span></h3>
+      <div class="popup-btns">
+        <button type="button" id="btnChiudiStorico">Chiudi</button>
+      </div>
+    </div>
+    <div id="storicoLista" class="report-confronto"></div>
   </div>
 </div>
 
@@ -157,6 +171,7 @@
   </div>
 </div>
 
+<script src="logica.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

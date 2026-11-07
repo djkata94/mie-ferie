@@ -1,0 +1,14 @@
+{
+  "name": "Gestione Ferie & Permessi",
+  "short_name": "Mie Ferie",
+  "description": "Registro ore di ferie e permessi",
+  "lang": "it",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#121309",
+  "theme_color": "#121309",
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
